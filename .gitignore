@@ -3,3 +3,5 @@ __pycache__/
 .pytest_cache/
 *.xlsx
 tests/fixtures/generated/
+.venv/
+venv/
