@@ -15,7 +15,62 @@ with:
 Supported banks: **Regions Bank** and **ServisFirst Bank**. Adding a
 third bank is one new parser module (see [Extensibility](#extensibility)).
 
-## Usage
+## Windows setup (easy — start here)
+
+You need two things once: **Git** (to download the tool) and **Python**
+(to run it). The install script below handles Python for you.
+
+**1. Install Git.** Open **PowerShell** (press `Start`, type `powershell`,
+press Enter) and run:
+
+```powershell
+winget install --id Git.Git -e
+```
+
+Close that window and open a **new** PowerShell window afterwards so Windows
+picks up Git.
+
+**2. Download the tool.** Pick a folder to keep it in (your home folder is
+fine) and run:
+
+```powershell
+cd ~
+git clone https://github.com/technogrady/statements-excel-converter.git
+cd statements-excel-converter
+```
+
+**3. Run the installer.** Just run:
+
+```powershell
+.\install.bat
+```
+
+This installs Python if it's missing, sets up a self-contained environment
+inside the folder (in `.venv`) and installs the tool's packages there — your
+system-wide Python is left untouched — and adds this folder to your PATH so
+you can run it from anywhere. When it finishes, **close the window and open a
+new one**.
+
+**4. Use it.** In the new window, point it at a folder full of statement
+PDFs:
+
+```powershell
+statements "C:\Users\you\Downloads\statements"
+```
+
+That writes `Bank_Statements.xlsx` into whatever folder you're currently in.
+To choose where the workbook goes, add `-o`:
+
+```powershell
+statements "C:\Users\you\Downloads\statements" -o "C:\Users\you\Desktop\Book.xlsx"
+```
+
+> **Prefer clicking to typing?** After step 2 you can just double-click
+> `install.bat` in File Explorer to do step 3.
+
+To update the tool later, `cd` back into the folder and run `git pull`.
+
+## Usage (any platform)
 
 ```bash
 pip install -r requirements.txt
