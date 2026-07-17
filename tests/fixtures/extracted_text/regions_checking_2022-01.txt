@@ -1,0 +1,53 @@
+===== page 1 =====
+Regions Bank
+Example Branch
+PO Box 0000
+Anytown, ST 00000
+ACME EXAMPLE LLC
+123 EXAMPLE ST
+ANYTOWN ST 00000
+ACCOUNT # xxxxxx1000
+Cycle 00
+000
+Page 1 of 3
+BUSINESS INTEREST CHECKING
+December 15, 2021 through January 14, 2022
+SUMMARY
+Beginning Balance $10,000.00 Minimum Daily Balance $5,000.00
+Deposits & Credits $5,000.00 + Average Daily Balance $8,000.00
+Withdrawals $5,750.00 - Annual Percentage Yield Earned 0.01%
+Checks $0.00 - Interest Paid This Year $2.00
+Fees $0.00 -
+Net Interest Earned $2.00 +
+Ending Balance $9,252.00
+DEPOSITS & CREDITS
+01/03 Sweep from Investment Acct 5,000.00
+Total Deposits & Credits $5,000.00
+INTEREST
+01/10 Net Interest Earned This Period 2.00
+Total Interest $2.00
+WITHDRAWALS
+12/18 Online Transfer to LOC 0000 1,000.00
+12/20 Online Transfer to LOC 0000 1,500.00
+12/22 Online Transfer to LOC 0000 500.00
+12/22 Wire Transfer Out Example Vendor 750.00
+12/31 Online Transfer to LOC 0000 2,000.00
+Total Withdrawals $5,750.00
+DAILY BALANCE SUMMARY
+Date Balance Date Balance Date Balance
+12/18 10,000.00 12/22 7,000.00 01/03 9,250.00
+12/20 8,500.00 12/31 5,000.00 01/10 9,252.00
+You may request account disclosures containing terms, fees, and rate information
+For all your banking needs, call 1-800-REGIONS (734-4667)
+===== page 2 =====
+Page 2 of 3
+EASY STEPS TO BALANCE YOUR ACCOUNT
+1. Compare the checks and withdrawals listed on this statement to your register.
+2. List any outstanding checks 101 250.00
+3. Enter the ending balance shown on this statement 12/34 999.99
+ABBREVIATIONS: APY - Annual Percentage Yield, ATM - Automated Teller Machine
+===== page 3 =====
+Page 3 of 3
+IN CASE OF ERRORS OR QUESTIONS ABOUT YOUR ELECTRONIC TRANSFERS
+Telephone us at 1-800-REGIONS or write us at the address shown above as soon as
+you can, if you think your statement or receipt is wrong.

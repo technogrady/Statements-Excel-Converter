@@ -1,0 +1,31 @@
+===== page 1 =====
+ServisFirst Bank
+0000 Example Place
+Anytown, ST 00000
+(000) 000-0000
+Date 8/30/22 Page 1
+Primary Acct. XXXXXXXXXXXX5678
+ACME EXAMPLE LLC
+123 EXAMPLE ST
+ANYTOWN ST 00000
+C H E C K I N G A C C O U N T S
+BUSINESS CHECKING
+Account Number XXXXXXXXXXXX1111 Statement Dates 8/01/22 thru 8/31/22
+Previous Balance 1,000.00 Days in the statement period 31
+1 Deposits/Credits 500.00 Average Ledger 1,200.00
+0 Checks/Debits .00 Average Collected 1,100.00
+Current Balance 1,500.00
+DEPOSITS AND OTHER CREDITS
+Date Description Amount
+8/05 Deposit 500.00
+BUSINESS SAVINGS
+Account Number XXXXXXXXXXXX2222 Statement Dates 8/01/22 thru 8/31/22
+Previous Balance 5,000.00 Days in the statement period 31
+1 Deposits/Credits 1,000.00 Average Ledger 5,500.00
+0 Checks/Debits .00 Average Collected 5,400.00
+Current Balance 6,000.00
+DEPOSITS AND OTHER CREDITS
+Date Description Amount
+8/10 Deposit 1,000.00
+MEMBER FDIC
+NOTICE: SEE REVERSE SIDE FOR IMPORTANT INFORMATION
