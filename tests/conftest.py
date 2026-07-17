@@ -45,6 +45,13 @@ def regions_stmt(fixture_dir):
 
 
 @pytest.fixture(scope="session")
+def regions_personal_stmt(all_fixtures_dir):
+    result = _parse_one(all_fixtures_dir, "regions_personal_2022-02.pdf")
+    assert len(result.statements) == 1
+    return result.statements[0]
+
+
+@pytest.fixture(scope="session")
 def servisfirst_stmt(fixture_dir):
     result = _parse_one(fixture_dir, "servisfirst_checking_2022-09.pdf")
     assert len(result.statements) == 1

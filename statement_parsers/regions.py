@@ -71,8 +71,11 @@ _SUMMARY_CROSSCHECKS = {
 _ACCOUNT_RE = re.compile(r"ACCOUNT\s*#\s*:?\s*([xX*]*\d+)")
 _ACCOUNT_LABEL_ONLY_RE = re.compile(r"ACCOUNT\s*#\s*:?\s*$")
 _ACCOUNT_NUMBER_ONLY_RE = re.compile(r"^([xX*]*\d+)\s*$")
+# ``through`` may be glued to the following month with no space
+# (pdfplumber extracts "January 1, 2020 throughJanuary 31, 2020" from many
+# personal/LifeGreen statements), so the whitespace around it is optional.
 _PERIOD_RE = re.compile(
-    r"([A-Z][a-z]+\s+\d{1,2},\s+\d{4})\s+through\s+([A-Z][a-z]+\s+\d{1,2},\s+\d{4})"
+    r"([A-Z][a-z]+\s+\d{1,2},\s+\d{4})\s*through\s*([A-Z][a-z]+\s+\d{1,2},\s+\d{4})"
 )
 _TX_RE = re.compile(r"^(\d{2}/\d{2})\s+(.+?)\s+\$?([\d,]+\.\d{2})$")
 _CHECK_TRIPLET_RE = re.compile(r"(\d{2}/\d{2})\s+(\d+)(\*?)\s+\$?([\d,]+\.\d{2})")
@@ -80,11 +83,21 @@ _TOTAL_RE = re.compile(r"^Total\s+(.+?)\s+\$?([\d,]*\.\d{2})$", re.IGNORECASE)
 _TERMINAL_RE = re.compile(r"^DAILY BALANCE SUMMARY\b")
 _CHECKS_COLHDR_RE = re.compile(r"^(Date\s+Check\s+No\.?\s+Amount\s*)+$", re.IGNORECASE)
 
-# Page furniture that must never be glued into a wrapped description.
+# Page furniture that must never be glued into a wrapped description. On
+# multi-page statements a section stays open across the page break, so the
+# per-page footer/header block lands mid-section and would otherwise be
+# appended to the last transaction's description.
 _NOISE_RES = [
-    re.compile(r"^Page \d+ of \d+$", re.IGNORECASE),
+    re.compile(r"^Page \d+ of\s*\d+$", re.IGNORECASE),
     re.compile(r"^ACCOUNT\s*#", re.IGNORECASE),
     re.compile(r"^Cycle\b"),
+    re.compile(r"^Enclosures\b", re.IGNORECASE),
+    re.compile(r"^Regions Bank\b", re.IGNORECASE),
+    re.compile(r"^For all your banking needs", re.IGNORECASE),
+    re.compile(r"^or visit us on the Internet", re.IGNORECASE),
+    re.compile(r"^Thank You For Banking With Regions", re.IGNORECASE),
+    re.compile(r"^You may request account disclosures", re.IGNORECASE),
+    re.compile(r"Member FDIC", re.IGNORECASE),
     _PERIOD_RE,
 ]
 
@@ -190,6 +203,12 @@ def parse(pages: list[str], filename: str) -> list[ParsedStatement]:
     for page in pages:
         if done:
             break
+        # A section stays open across a page break, but a transaction's
+        # description never wraps across one — so drop the continuation anchor
+        # at each page boundary. Otherwise page-top furniture (branch name,
+        # address) that isn't recognized noise would glue onto the previous
+        # page's last transaction.
+        last_tx = None
         for raw_line in page.splitlines():
             line = raw_line.strip()
             if not line:

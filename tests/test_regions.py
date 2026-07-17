@@ -68,6 +68,80 @@ class TestRegionsGroundTruth:
         assert "999.99" not in descriptions
 
 
+class TestRegionsPersonalLayout:
+    """Regions personal/LifeGreen statements (synthetic fixture
+    regions_personal_2022-02.pdf). These reproduce the extraction quirks the
+    business fixtures don't: 'through' glued to the next month, and per-page
+    footer/header furniture landing inside an open transaction section on the
+    multi-page path."""
+
+    def test_glued_through_period_parses(self, regions_personal_stmt):
+        s = regions_personal_stmt
+        # "January 11, 2022 throughFebruary 7, 2022" — no space after 'through'.
+        assert s.period_start == date(2022, 1, 11)
+        assert s.period_end == date(2022, 2, 7)
+        assert s.account_last4 == "7777"
+        assert s.account_label == "LIFEGREEN BUSINESS CHECKING"
+
+    def test_reconciles_exactly(self, regions_personal_stmt):
+        s = regions_personal_stmt
+        assert s.reconciled is True
+        total = sum(t.amount for t in s.transactions)
+        assert s.opening_balance + total == s.closing_balance
+
+    def test_no_reconciliation_or_crosscheck_mismatch_notes(self, regions_personal_stmt):
+        # Section totals and SUMMARY figures agree with parsed sums, and the
+        # statement reconciles — so no mismatch/failure notes. (Unrecognized
+        # page furniture may still produce informational 'stray line' notes;
+        # those are asserted separately below.)
+        bad = [
+            n for n in regions_personal_stmt.notes
+            if "!=" in n or "Reconciliation failed" in n
+        ]
+        assert bad == []
+
+    def test_unrecognized_furniture_is_noted_not_glued(self, regions_personal_stmt):
+        # Page-2 header lines that aren't recognized noise (the branch-office
+        # line, the standalone branch code) are reported as ignored stray lines
+        # rather than glued onto the prior transaction — a visible, safe signal.
+        stray = [n for n in regions_personal_stmt.notes if "stray line" in n]
+        assert any("Example Branch Office" in n for n in stray)
+
+    def test_all_sections_parsed(self, regions_personal_stmt):
+        by_type = {}
+        for t in regions_personal_stmt.transactions:
+            by_type.setdefault(t.tx_type, []).append(t)
+        assert len(by_type[TX_DEPOSIT]) == 4
+        assert len(by_type[TX_INTEREST]) == 1
+        assert len(by_type[TX_WITHDRAWAL]) == 2
+        assert len(by_type["Fee"]) == 1
+
+    def test_footer_and_header_furniture_not_glued(self, regions_personal_stmt):
+        # The per-page footer and the reprinted page-2 header block (including
+        # the branch-office line, which is not recognized page noise) must not
+        # leak into any transaction description.
+        joined = " ".join(t.description for t in regions_personal_stmt.transactions)
+        for leak in (
+            "banking needs",
+            "Banking With Regions",
+            "Member FDIC",
+            "Example Branch",
+            "Page 2",
+            "Enclosures",
+            "9,000.00",  # a DAILY BALANCE SUMMARY figure
+        ):
+            assert leak not in joined, f"{leak!r} leaked into a description"
+
+    def test_last_deposit_before_page_break_is_clean(self, regions_personal_stmt):
+        # 01/15 is the last deposit on page 1; the page-1 footer follows it and
+        # the page-2 header precedes the next row — its description must stay put.
+        d = next(
+            t for t in regions_personal_stmt.transactions
+            if t.date == date(2022, 1, 15)
+        )
+        assert d.description == "Square Inc 220115p2Example Merchant Port"
+
+
 class TestRegionsLayoutVariants:
     PAGE = """Regions Bank
 {account_lines}
