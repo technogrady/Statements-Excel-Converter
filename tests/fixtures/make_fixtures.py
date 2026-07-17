@@ -210,6 +210,85 @@ def make_regions_apr(path: Path) -> None:
     _write_pages(path, pages)
 
 
+def make_regions_personal(path: Path) -> None:
+    """Regions personal/LifeGreen layout (synthetic), reproducing the
+    extraction quirks these statements show that the business fixtures don't:
+
+    * the period line comes out with ``through`` glued to the next month —
+      ``January 11, 2022 throughFebruary 7, 2022`` — with no space;
+    * a per-page footer block ('For all your banking needs', 'Thank You For
+      Banking With Regions!', the 'Regions Bank Member FDIC' disclosure) and a
+      reprinted page-top header block land INSIDE an open transaction section
+      on the multi-page path, and must not glue into a description.
+
+    Reconciles: 8,000.00 + 6,500.00 (deposits) + 5.00 (interest)
+    − 1,500.00 (withdrawals) − 25.00 (fees) = 12,980.00.
+    """
+    footer = [
+        "For all your banking needs, please call 1-800-REGIONS (734-4667)",
+        "or visit us on the Internet at www.regions.com. (TTY/TDD 1-800-374-5791)",
+        "Thank You For Banking With Regions!",
+        "2022 Regions Bank Member FDIC. All loans subject to credit approval.",
+    ]
+    page1 = [
+        "Regions Bank",
+        "Example Branch Office",
+        "000 Example Parkway",
+        "Anytown, ST00000",
+        "EXAMPLE BUSINESS LLC",
+        "ADDRESS LINE 1",
+        "ANYTOWN ST 00000",
+        "ACCOUNT # xxxxxx7777",
+        "092",
+        "Cycle 04",
+        "Enclosures 0",
+        "Page 1 of2",
+        "LIFEGREEN BUSINESS CHECKING",
+        "January 11, 2022 throughFebruary 7, 2022",
+        "SUMMARY",
+        "Beginning Balance $8,000.00 Minimum Balance $5,000",
+        "Deposits & Credits $6,500.00 + Average Balance $9,000",
+        "Net Interest Earned $5.00 + Annual Percentage Yield Earned 0.01%",
+        "Withdrawals $1,500.00 - Interest This Period $5.00",
+        "Fees $25.00 - Average Collected Balance $9,100.00",
+        "Automatic Transfers $0.00 + 2022 YTD Interest $10.00",
+        "Checks $0.00 -",
+        "Ending Balance $12,980.00",
+        "DEPOSITS & CREDITS",
+        "01/12 Deposit - Thank You 1,000.00",
+        "01/15 Square Inc 220115p2Example Merchant Port 2,000.00",
+        # section stays open — footer lands mid-section:
+        *footer,
+    ]
+    page2 = [
+        # page-top header block reprints while the DEPOSITS section is still
+        # open; 'Example Branch Office' is not recognized noise, so it exercises
+        # the per-page continuation-anchor reset.
+        "Regions Bank",
+        "Example Branch Office",
+        "ACCOUNT # xxxxxx7777",
+        "092",
+        "Cycle 04",
+        "Enclosures 0",
+        "Page 2 of2",
+        "01/20 Deposit - Thank You 3,000.00",
+        "01/28 Deposit - Thank You 500.00",
+        "Total Deposits & Credits $6,500.00",
+        "INTEREST",
+        "02/07 Interest Payment 5.00",
+        "WITHDRAWALS",
+        "01/25 Wire TransferExample Vendor 1,000.00",
+        "02/01 Card PurchaseExample Store 500.00",
+        "FEES",
+        "01/25 Wire TransferWire Fee 25.00",
+        "DAILY BALANCE SUMMARY",
+        "Date Balance Date Balance Date Balance",
+        "01/12 9,000.00 01/20 12,000.00 02/07 12,980.00",
+        *footer,
+    ]
+    _write_pages(path, [page1, page2])
+
+
 # ---------------------------------------------------------------------------
 # ServisFirst fixtures (synthetic)
 # ---------------------------------------------------------------------------
@@ -453,6 +532,7 @@ ALL_FIXTURES = {
     "servisfirst_multi_account.pdf": make_servisfirst_multi_account,
     "servisfirst_overdrawn.pdf": make_servisfirst_overdrawn,
     "regions_checking_2022-01_redownload.pdf": make_regions_dec,
+    "regions_personal_2022-02.pdf": make_regions_personal,
     "unknown_bank.pdf": make_unrecognized_bank,
     "scanned_image_only.pdf": make_no_text,
     "password_protected.pdf": make_encrypted,

@@ -1,0 +1,56 @@
+===== page 1 =====
+Regions Bank
+Example Branch Office
+000 Example Parkway
+Anytown, ST00000
+EXAMPLE BUSINESS LLC
+ADDRESS LINE 1
+ANYTOWN ST 00000
+ACCOUNT # xxxxxx7777
+092
+Cycle 04
+Enclosures 0
+Page 1 of2
+LIFEGREEN BUSINESS CHECKING
+January 11, 2022 throughFebruary 7, 2022
+SUMMARY
+Beginning Balance $8,000.00 Minimum Balance $5,000
+Deposits & Credits $6,500.00 + Average Balance $9,000
+Net Interest Earned $5.00 + Annual Percentage Yield Earned 0.01%
+Withdrawals $1,500.00 - Interest This Period $5.00
+Fees $25.00 - Average Collected Balance $9,100.00
+Automatic Transfers $0.00 + 2022 YTD Interest $10.00
+Checks $0.00 -
+Ending Balance $12,980.00
+DEPOSITS & CREDITS
+01/12 Deposit - Thank You 1,000.00
+01/15 Square Inc 220115p2Example Merchant Port 2,000.00
+For all your banking needs, please call 1-800-REGIONS (734-4667)
+or visit us on the Internet at www.regions.com. (TTY/TDD 1-800-374-5791)
+Thank You For Banking With Regions!
+2022 Regions Bank Member FDIC. All loans subject to credit approval.
+===== page 2 =====
+Regions Bank
+Example Branch Office
+ACCOUNT # xxxxxx7777
+092
+Cycle 04
+Enclosures 0
+Page 2 of2
+01/20 Deposit - Thank You 3,000.00
+01/28 Deposit - Thank You 500.00
+Total Deposits & Credits $6,500.00
+INTEREST
+02/07 Interest Payment 5.00
+WITHDRAWALS
+01/25 Wire TransferExample Vendor 1,000.00
+02/01 Card PurchaseExample Store 500.00
+FEES
+01/25 Wire TransferWire Fee 25.00
+DAILY BALANCE SUMMARY
+Date Balance Date Balance Date Balance
+01/12 9,000.00 01/20 12,000.00 02/07 12,980.00
+For all your banking needs, please call 1-800-REGIONS (734-4667)
+or visit us on the Internet at www.regions.com. (TTY/TDD 1-800-374-5791)
+Thank You For Banking With Regions!
+2022 Regions Bank Member FDIC. All loans subject to credit approval.
