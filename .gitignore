@@ -5,3 +5,4 @@ __pycache__/
 tests/fixtures/generated/
 .venv/
 venv/
+.DS_Store

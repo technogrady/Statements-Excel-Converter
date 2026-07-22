@@ -47,7 +47,15 @@ from .base import (
 
 BANK = "ServisFirst"
 
-_SIGNATURES = re.compile(r"servisfirst|servis1st", re.IGNORECASE)
+# The "ServisFirst" wordmark is sometimes rendered as an image with no
+# extractable text. The reverse-side disclosure footer, however, is printed as
+# text on every page and is unique to ServisFirst statements in this corpus, so
+# it recovers those files. Regions is matched first (see PARSERS order in
+# __init__), so this fallback can never hijack a Regions statement.
+_SIGNATURES = re.compile(
+    r"servisfirst|servis1st|NOTICE:\s*SEE\s+REVERSE\s+SIDE\s+FOR\s+IMPORTANT\s+INFORMATION",
+    re.IGNORECASE,
+)
 
 
 def matches(text: str) -> bool:
