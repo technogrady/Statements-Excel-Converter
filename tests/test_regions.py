@@ -4,7 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 from statement_parsers import regions
-from statement_parsers.base import TX_DEPOSIT, TX_INTEREST, TX_WITHDRAWAL
+from statement_parsers.base import TX_DEPOSIT, TX_FEE, TX_INTEREST, TX_WITHDRAWAL
 
 
 class TestRegionsGroundTruth:
@@ -168,6 +168,129 @@ DAILY BALANCE SUMMARY
         stmt = regions.parse([text], "f.pdf")[0]
         assert stmt.account_number_full == "0056781000"
         assert stmt.account_last4 == "1000"
+
+    def test_spaced_out_of_sequence_markers_in_two_check_columns(self):
+        text = """Regions Bank
+ACCOUNT # xxxxxx1234
+BUSINESS CHECKINGS
+January 15, 2022 through February 14, 2022
+SUMMARY
+Beginning Balance $10,000.00
+Checks $8,874.78
+Ending Balance $1,125.22
+CHECKS
+Date Check No. Amount Date Check No. Amount
+01/16 8375 * 5,294.78 01/24 8611 * 3,580.00
+Total Checks $8,874.78
+DAILY BALANCE SUMMARY
+"""
+        stmt = regions.parse([text], "f.pdf")[0]
+
+        assert [(t.check_no, t.amount) for t in stmt.transactions] == [
+            ("8375", Decimal("-5294.78")),
+            ("8611", Decimal("-3580.00")),
+        ]
+        assert all("out of sequence" in t.description for t in stmt.transactions)
+        assert stmt.reconciled is True
+        assert stmt.notes == []
+
+    def test_checks_without_check_numbers(self):
+        # Counter/substitute checks print with a blank check-number column, so
+        # extraction yields bare ``MM/DD amount`` pairs — standalone, sharing a
+        # two-column row with a numbered check, and two-per-row. All must be
+        # captured (dropping one silently unbalances the CHECKS total).
+        text = """Regions Bank
+ACCOUNT # xxxxxx1234
+BUSINESS CHECKINGS
+January 15, 2022 through February 14, 2022
+SUMMARY
+Beginning Balance $10,000.00
+Checks $3,343.15
+Ending Balance $6,656.85
+CHECKS
+Date Check No. Amount Date Check No. Amount
+01/16 8375 100.00 01/24 60.00
+01/28 33.15 02/01 3,150.00
+Total Checks $3,343.15
+DAILY BALANCE SUMMARY
+"""
+        stmt = regions.parse([text], "f.pdf")[0]
+
+        assert [(t.check_no, t.amount) for t in stmt.transactions] == [
+            ("8375", Decimal("-100.00")),
+            (None, Decimal("-60.00")),
+            (None, Decimal("-33.15")),
+            (None, Decimal("-3150.00")),
+        ]
+        # Numberless checks get a plain "Check" description, no fabricated number.
+        assert [t.description for t in stmt.transactions] == [
+            "Check 8375",
+            "Check",
+            "Check",
+            "Check",
+        ]
+        assert stmt.reconciled is True
+        assert stmt.notes == []
+
+    def test_checks_converted_to_electronic_withdrawals_section(self):
+        # Regions prints checks a merchant converted to ACH in their own
+        # section; the row is 'MM/DD checkno description amount' and the debit
+        # must be counted (dropping it broke reconciliation by that amount).
+        text = """Regions Bank
+ACCOUNT # xxxxxx1234
+LIFEGREEN BUSINESS CHECKING
+October 15, 2024 through November 14, 2024
+SUMMARY
+Beginning Balance $100.00
+Ending Balance $65.24
+CHECKS CONVERTED BY MERCHANT TO ELECTRONIC WITHDRAWALS
+Date Check No. Description of Check Payment Amount
+10/17 9749 Advance Auto Par Advance Au 14003100000380 34.76
+Checks that are converted by a merchant to an electronic withdrawal are not returned to Regions. Therefore, if you receive
+check enclosures or check images with your monthly statement, checks listed above are not included with this statement.
+DAILY BALANCE SUMMARY
+"""
+        stmt = regions.parse([text], "f.pdf")[0]
+
+        assert len(stmt.transactions) == 1
+        tx = stmt.transactions[0]
+        assert tx.amount == Decimal("-34.76")
+        assert tx.date == date(2024, 10, 17)
+        # The trailing disclaimer prose must not glue onto the description.
+        assert "converted" not in tx.description.lower()
+        assert stmt.reconciled is True
+        assert stmt.notes == []
+
+    def test_returned_checks_section_credited_not_fee_debited(self):
+        # 'RETURNED CHECKS' is its own section of credits. Before it was
+        # recognized, its rows were absorbed into FEES and booked as debits —
+        # a returned CREDIT counted as a fee DEBIT, doubling the recon error.
+        text = """Regions Bank
+ACCOUNT # xxxxxx1234
+LIFEGREEN BUSINESS CHECKING
+January 15, 2022 through February 14, 2022
+SUMMARY
+Beginning Balance $1,000.00
+Fees $7.75 -
+Ending Balance $2,492.25
+FEES
+01/20 Cash Deposit Fee 7.75
+RETURNED CHECKS
+01/22 Credit-Returned Ck# 1234 500.00
+01/25 Credit-Returned Ck# 5678 1,000.00
+Total Returned Checks $1,500.00
+DAILY BALANCE SUMMARY
+"""
+        stmt = regions.parse([text], "f.pdf")[0]
+
+        fees = [t for t in stmt.transactions if t.tx_type == TX_FEE]
+        credits = [t for t in stmt.transactions if t.tx_type == TX_DEPOSIT]
+        assert [t.amount for t in fees] == [Decimal("-7.75")]
+        assert sorted(t.amount for t in credits) == [Decimal("500.00"), Decimal("1000.00")]
+        assert stmt.reconciled is True
+        # FEES cross-check now agrees ($7.75), and the returned-check total
+        # matches — so no mismatch notes at all.
+        assert stmt.notes == []
 
     def test_label_captured_verbatim_not_hardcoded(self):
         text = self.PAGE.format(account_lines="ACCOUNT # xxxxxx1234")

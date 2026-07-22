@@ -1,4 +1,10 @@
 pdfplumber>=0.11
+# Fallback text extractor for PDFs whose text layer pdfminer can't decode
+# (e.g. some ServisFirst "Enhanced" statements). Optional: parse_pdf works
+# without it and only uses it to recover files pdfplumber can't read.
+# NOTE: PyMuPDF is AGPL-3.0 (or a paid commercial license). Fine for internal
+# use; review before redistributing. A permissive alternative is pypdfium2.
+pymupdf>=1.24
 pandas>=2.0
 XlsxWriter>=3.1
 openpyxl>=3.1

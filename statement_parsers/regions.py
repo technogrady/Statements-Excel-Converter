@@ -56,6 +56,18 @@ SECTIONS: dict[str, tuple[str, int]] = {
     "WITHDRAWALS": (TX_WITHDRAWAL, -1),
     "FEES": (TX_FEE, -1),
     "CHECKS": (TX_CHECK, -1),
+    # Returned-check credits (rows: 'MM/DD Credit-Returned Ck# NNNN amount',
+    # closed by a 'Total Returned Checks' line). Printed as its own section, so
+    # without this the rows were absorbed into FEES and booked as debits — a
+    # returned CREDIT counted as a fee DEBIT, doubling the reconciliation error.
+    # Sign is +1 to match the 'Credit-Returned' rows; kept as its own section so
+    # it isn't folded into the DEPOSITS & CREDITS summary cross-check.
+    "RETURNED CHECKS": (TX_DEPOSIT, 1),
+    # Checks a merchant converted to an ACH debit. Printed as its own section
+    # (rows: ``MM/DD checkno description amount``) and NOT folded into the
+    # WITHDRAWALS summary total, so it gets its own section key. It's a debit;
+    # the generic row regex handles the row once the header is recognized.
+    "CHECKS CONVERTED BY MERCHANT TO ELECTRONIC WITHDRAWALS": (TX_WITHDRAWAL, -1),
     "AUTOMATIC TRANSFERS": (TX_TRANSFER, -1),
 }
 
@@ -78,7 +90,16 @@ _PERIOD_RE = re.compile(
     r"([A-Z][a-z]+\s+\d{1,2},\s+\d{4})\s*through\s*([A-Z][a-z]+\s+\d{1,2},\s+\d{4})"
 )
 _TX_RE = re.compile(r"^(\d{2}/\d{2})\s+(.+?)\s+\$?([\d,]+\.\d{2})$")
-_CHECK_TRIPLET_RE = re.compile(r"(\d{2}/\d{2})\s+(\d+)(\*?)\s+\$?([\d,]+\.\d{2})")
+# A CHECKS-section entry: ``MM/DD [checkno[*]] amount``. The check number is
+# optional — counter/substitute checks print with a blank number column, so
+# extraction yields a bare ``MM/DD amount`` pair, sometimes sharing a two-column
+# row with a numbered check (dropping it silently unbalances the section total).
+# Regions marks out-of-sequence checks with ``*``; depending on the PDF/font,
+# extraction produces either ``8611*`` or ``8611 *``, so the marker's whitespace
+# is optional too.
+_CHECK_ENTRY_RE = re.compile(
+    r"(\d{2}/\d{2})\s+(?:(\d+)\s*(\*?)\s+)?\$?([\d,]+\.\d{2})"
+)
 _TOTAL_RE = re.compile(r"^Total\s+(.+?)\s+\$?([\d,]*\.\d{2})$", re.IGNORECASE)
 _TERMINAL_RE = re.compile(r"^DAILY BALANCE SUMMARY\b")
 _CHECKS_COLHDR_RE = re.compile(r"^(Date\s+Check\s+No\.?\s+Amount\s*)+$", re.IGNORECASE)
@@ -98,6 +119,12 @@ _NOISE_RES = [
     re.compile(r"^Thank You For Banking With Regions", re.IGNORECASE),
     re.compile(r"^You may request account disclosures", re.IGNORECASE),
     re.compile(r"Member FDIC", re.IGNORECASE),
+    # Furniture inside the 'CHECKS CONVERTED BY MERCHANT ...' section: its
+    # column header and the two-line disclaimer that follows the rows. Kept out
+    # so the disclaimer prose can't glue onto the last transaction description.
+    re.compile(r"^Date\s+Check No\.?\s+Description", re.IGNORECASE),
+    re.compile(r"^Checks that are converted by a merchant", re.IGNORECASE),
+    re.compile(r"^check enclosures or check images", re.IGNORECASE),
     _PERIOD_RE,
 ]
 
@@ -246,7 +273,7 @@ def parse(pages: list[str], filename: str) -> list[ParsedStatement]:
                 if _CHECKS_COLHDR_RE.match(line):
                     continue
                 matched = False
-                for cm in _CHECK_TRIPLET_RE.finditer(line):
+                for cm in _CHECK_ENTRY_RE.finditer(line):
                     matched = True
                     mm, dd = (int(x) for x in cm.group(1).split("/"))
                     tx_date, warn = infer_year(mm, dd, period_start, period_end)
@@ -255,7 +282,12 @@ def parse(pages: list[str], filename: str) -> list[ParsedStatement]:
                     if tx_date is None:
                         continue
                     check_no = cm.group(2)
-                    desc = f"Check {check_no}" + (" (out of sequence)" if cm.group(3) else "")
+                    if check_no is None:
+                        desc = "Check"
+                    else:
+                        desc = f"Check {check_no}" + (
+                            " (out of sequence)" if cm.group(3) else ""
+                        )
                     amount = -parse_money(cm.group(4))
                     transactions.append(
                         Transaction(tx_date, desc, amount, TX_CHECK, check_no, filename)
