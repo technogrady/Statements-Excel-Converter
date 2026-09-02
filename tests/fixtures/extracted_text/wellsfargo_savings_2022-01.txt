@@ -1,0 +1,50 @@
+===== page 1 =====
+Business Market Rate Savings
+January 31, 2022 Page 1 of 2
+EXAMPLE COMPANY INC
+123 EXAMPLE ST
+ANYTOWN FL 00000
+Questions?
+Available by phone Mon-Sat 7:00am-11:00pm Eastern
+1-800-CALL-WELLS (1-800-225-5935)
+Online: wellsfargo.com/biz
+Write: Wells Fargo Bank, N.A. (000)
+P.O. Box 0000
+Portland, OR 00000-0000
+Your Business and Wells Fargo
+Statement period activity summary Account number: 0000001234
+Beginning balance on 1/1 $1,000.00 EXAMPLE COMPANY INC
+Deposits/Credits 7,000.16 Florida account terms and conditions apply
+Withdrawals/Debits - 2,500.00 For Direct Deposit use
+Ending balance on 1/31 $5,500.16 Routing Number (RTN): 000000000
+Interest summary
+Interest paid this statement $0.16
+Average collected balance $3,000.00
+===== page 2 =====
+January 31, 2022 Page 2 of 2
+Transaction history
+Deposits/ Withdrawals/ Ending daily
+Date Description Credits Debits balance
+1/05 Online Transfer From Example Company Inc Ref #Ab0000001 Business 2,000.00 3,000.00
+Checking Quarterly Sales Tax
+1/10 Online Transfer From Example Company Inc Ref #Ab0000002 Business 1,000.00
+Checking Sales Tax Est
+1/10 Online Transfer From Example Company Inc Ref #Ab0000003 Business 3,000.00 7,000.00
+Checking Estimated Income Tax
+1/18 Online Transfer to Example Company Inc Ref #Ab0000004 Business Checking 500.00 6,500.00
+December Sales Tax
+1/22 Online Transfer Ref #Ab0000005 to Business Card Xxxxxxxxxxxx0001 on 700.00
+01/22/22
+1/22 Online Transfer Ref #Ab0000006 to Business Card Xxxxxxxxxxxx0002 on 1,300.00 4,500.00
+01/22/22
+1/28 Wt Seq00000 Example Corp Srf# 0000000000000000 Trn# 000000000000 1,000.00 5,500.00
+1/31 Interest Payment 0.16 5,500.16
+Ending balance on 1/31 5,500.16
+Totals $7,000.16 $2,500.00
+The Ending Daily Balance does not reflect any pending withdrawals or holds on deposited funds.
+Monthly service fee summary
+Fee period 01/01/2022 - 01/31/2022 Standard monthly service fee $5.00 You paid $0.00
+IMPORTANT ACCOUNT INFORMATION
+NEW YORK CITY CUSTOMERS ONLY -- Pursuant to New York City regulations,
+Account Balance Calculation Worksheet
+1. Use the following worksheet to calculate your overall account balance.

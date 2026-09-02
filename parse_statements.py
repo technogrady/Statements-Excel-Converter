@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Bank Statement → Excel consolidation tool.
 
-Parse a folder of bank statement PDFs (digital text, not scanned) and
-produce a single Excel workbook: an Inventory tab (one row per
-statement, with per-account coverage summary) plus one worksheet per
-bank account with every transaction, date-sorted and deduplicated at
-the statement level.
+Parse a folder of bank statement PDFs and produce a single Excel
+workbook: an Inventory tab (one row per statement, with per-account
+coverage summary) plus one worksheet per bank account with every
+transaction, date-sorted and deduplicated at the statement level.
+
+Statements are expected to carry a text layer; --ocr additionally
+machine-reads scanned ones (see statement_parsers/ocr.py).
 
 Usage:
-    python parse_statements.py <input_folder> [-o output.xlsx]
+    python parse_statements.py <input_folder> [-o output.xlsx] [--ocr]
 """
 from __future__ import annotations
 
@@ -19,8 +21,8 @@ from pathlib import Path
 
 from consolidation import consolidate
 from excel_writer import write_workbook
-from statement_parsers import parse_pdf
-from statement_parsers.base import STATUS_OK
+from statement_parsers import ocr_availability, parse_pdf
+from statement_parsers.base import STATUS_NO_TEXT, STATUS_OK
 
 
 def find_pdfs(folder: Path) -> list[Path]:
@@ -40,6 +42,13 @@ def main(argv: list[str] | None = None) -> int:
         "-o", "--output", default="Bank_Statements.xlsx",
         help="output workbook path (default: Bank_Statements.xlsx)",
     )
+    ap.add_argument(
+        "--ocr", action="store_true",
+        help="machine-read scanned statements that have no text layer "
+             "(needs Tesseract OCR installed). Slower, and OCR'd figures are "
+             "flagged for spot-checking; a statement that doesn't reconcile "
+             "after OCR is reported unread rather than imported.",
+    )
     args = ap.parse_args(argv)
 
     folder = Path(args.input_folder)
@@ -51,12 +60,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: no PDF files found under {folder}", file=sys.stderr)
         return 2
 
+    use_ocr = args.ocr
+    if use_ocr:
+        ok, reason = ocr_availability()
+        if not ok:
+            print(f"warning: --ocr requested but unavailable, continuing without it.\n{reason}",
+                  file=sys.stderr)
+            use_ocr = False
+        else:
+            print("OCR enabled for statements with no text layer (this is slow).")
+
     print(f"Scanning {len(pdfs)} PDF file(s) in {folder} ...")
     results = []
     for path in pdfs:
-        result = parse_pdf(path)
+        result = parse_pdf(path, ocr=use_ocr)
         results.append(result)
-        if result.status != STATUS_OK:
+        if result.via_ocr:
+            print(f"  [OCR] {result.source_file}: machine-read — spot-check the figures")
+        elif result.status != STATUS_OK:
             print(f"  [{result.status}] {result.source_file}: {result.detail[:90]}")
 
     consolidation = consolidate(results)
@@ -76,6 +97,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  files processed:    {len(results)}")
     print(f"  statements parsed:  {len(statements)}")
     print(f"  duplicates:         {n_dupes}")
+    n_ocr = sum(1 for r in results if r.via_ocr)
+    if n_ocr:
+        print(f"  read by OCR:        {n_ocr}  (flagged on the Inventory tab)")
     print(f"  failures:           {n_failures}"
           + (f"  ({', '.join(f'{k}={v}' for k, v in sorted(status_counts.items()) if k != STATUS_OK)})"
              if n_failures else ""))
@@ -87,6 +111,8 @@ def main(argv: list[str] | None = None) -> int:
               + (f", missing months: {', '.join(g.missing_months)}" if g.missing_months else ""))
     if unreconciled:
         print(f"  ⚠ reconciliation FAILED for {len(unreconciled)} statement(s) — see Inventory tab")
+    if not use_ocr and any(r.status == STATUS_NO_TEXT for r in results):
+        print("  note: some files look like scans — re-run with --ocr to machine-read them")
     print(f"  workbook written:   {args.output}")
     return 0
 

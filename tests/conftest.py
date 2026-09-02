@@ -68,3 +68,17 @@ def servisfirst_overdrawn(all_fixtures_dir):
     result = _parse_one(all_fixtures_dir, "servisfirst_overdrawn.pdf")
     assert len(result.statements) == 1
     return result.statements[0]
+
+
+@pytest.fixture(scope="session")
+def wellsfargo_savings_stmt(fixture_dir):
+    result = _parse_one(fixture_dir, "wellsfargo_savings_2022-01.pdf")
+    assert len(result.statements) == 1
+    return result.statements[0]
+
+
+@pytest.fixture(scope="session")
+def wellsfargo_checking_stmt(fixture_dir):
+    result = _parse_one(fixture_dir, "wellsfargo_checking_2022-02.pdf")
+    assert len(result.statements) == 1
+    return result.statements[0]

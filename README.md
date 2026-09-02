@@ -1,8 +1,7 @@
 # Bank Statement → Excel Consolidation Tool
 
-Parses a folder of bank statement PDFs (digitally generated text — not
-scans) and produces a single Excel workbook (`Bank_Statements.xlsx`)
-with:
+Parses a folder of bank statement PDFs and produces a single Excel
+workbook (`Bank_Statements.xlsx`) with:
 
 1. **One worksheet per bank account** — every transaction from every
    statement for that account, sorted by date, statement-level
@@ -12,8 +11,9 @@ with:
    the penny, plus a per-account **Coverage Summary** (labels used over
    time, balance-chain status, missing months).
 
-Supported banks: **Regions Bank** and **ServisFirst Bank**. Adding a
-third bank is one new parser module (see [Extensibility](#extensibility)).
+Supported banks: **Regions Bank**, **ServisFirst Bank** and **Wells
+Fargo**. Adding another bank is one new parser module (see
+[Extensibility](#extensibility)).
 
 ## Windows setup (easy — start here)
 
@@ -74,13 +74,17 @@ To update the tool later, `cd` back into the folder and run `git pull`.
 
 ```bash
 pip install -r requirements.txt
-python parse_statements.py <input_folder> [-o output.xlsx]
+python parse_statements.py <input_folder> [-o output.xlsx] [--ocr]
 ```
 
 The folder is searched recursively for `*.pdf` (case-insensitive). One
 bad PDF never aborts the run — encrypted, unrecognized, scanned-image,
 or unparsable files become flagged Inventory rows, and a run summary is
 printed to stdout.
+
+Statements are expected to carry a real text layer (i.e. downloaded from
+the bank, not scanned). Add `--ocr` to machine-read scanned ones too —
+see [Scanned statements (`--ocr`)](#scanned-statements---ocr).
 
 ## What the tool checks for you
 
@@ -89,7 +93,8 @@ printed to stdout.
   show as `FAILED (Δ $x.xx)` on the Inventory tab; parsed counts and
   totals are also cross-checked against the statement's own summary
   figures (Regions section totals; ServisFirst `9 Deposits/Credits` /
-  `22 Checks/Debits` declarations, check-image captions).
+  `22 Checks/Debits` declarations, check-image captions; Wells Fargo
+  `Deposits/Credits` / `Withdrawals/Debits` summary totals).
 * **Balance chaining (per account)** — each statement's closing balance
   must equal the next statement's opening balance. Chains that link
   across a product-name change prove "renamed account, same account";
@@ -106,6 +111,85 @@ printed to stdout.
   Individual transactions are never deduped across statements —
   recurring identical transactions are legitimate.
 
+### Wells Fargo: how credits and debits are told apart
+
+Wells Fargo prints deposits and withdrawals in two *side-by-side money
+columns*, and PDF text extraction throws the column geometry away — a
+row comes out as `1/5 Online Transfer From ... 5,800.00 8,564.43` with
+nothing to say which column the `5,800.00` sat in. The parser therefore
+recovers the sign arithmetically rather than guessing:
+
+* the **Ending daily balance** column pins the exact net change of every
+  run of rows it closes, so each run's signs are *solved* for;
+* the description ("Transfer **From**" = credit, "Transfer ... **to**" =
+  debit, `Interest Payment`, `Purchase`, …) only picks between
+  assignments that are all arithmetically valid;
+* a run the balance column cannot explain keeps its description-hinted
+  signs, gets a note on the Inventory tab, and fails reconciliation —
+  never a silently reversed transaction;
+* the statement's own `Deposits/Credits` / `Withdrawals/Debits` totals
+  are cross-checked afterwards.
+
+**Scope:** one deposit account per PDF. Wells Fargo also issues
+*combined* statements carrying several accounts in one file; those are
+reported per file with "combined statement with more than one account is
+not supported" rather than half-imported. Split the PDF by account and
+re-run.
+
+**Scanned statements:** a Wells Fargo statement that was printed and
+scanned back in has no text layer at all. Run with `--ocr` to machine-read
+it — see [Scanned statements (`--ocr`)](#scanned-statements---ocr).
+
+## Scanned statements (`--ocr`)
+
+Statements that were printed and scanned back in carry no text layer, so
+every extractor returns nothing and the file is reported `NO_TEXT
+(possible scan)`. Add `--ocr` to render those pages and machine-read them
+instead:
+
+```bash
+python parse_statements.py ./statements --ocr
+```
+
+```powershell
+statements "C:\path\to\folder" --ocr
+```
+
+It needs the **Tesseract** OCR engine (`install.bat` installs it on
+Windows; `brew install tesseract` on macOS, `sudo apt install
+tesseract-ocr` on Linux). Nothing extra to pip-install — pages are
+rendered with PyMuPDF and handed to the `tesseract` binary directly. If
+the engine is missing the run continues without OCR and says so, with
+install instructions; set `TESSERACT_CMD` if it lives somewhere unusual.
+
+Guard rails, because OCR *guesses* at characters and a smudged `8` can
+come back as `3`:
+
+* **A statement is only accepted if it reconciles.** `opening +
+  Σ(transactions) == closing` to the penny is a demanding check on
+  machine-read digits: one misread amount breaks it, and the file is then
+  reported unread rather than imported with wrong numbers in it.
+* **Accepted statements are still flagged.** Every OCR'd statement gets
+  an `OCR:` note on the Inventory tab telling you to spot-check it, and
+  the run summary counts them.
+* **OCR never overrides, or blurs, a readable text layer.** It is gated
+  on the *text*, not the outcome: it runs only when no extractor found
+  any text, plus part-rescanned files where one page lost its text while
+  another kept it. A file that has text but doesn't parse or balance is a
+  real problem to report — re-reading the same pixels can only cost
+  minutes and make the diagnosis vaguer.
+* **A rejected scan still says why.** "The scan has no text" and "the
+  scan read fine but its account number is blacked out" need completely
+  different fixes, so the Inventory row names the actual one.
+
+Expect a few seconds per page. Only the scanned files pay that cost.
+
+One thing worth knowing: **a redacted account number blocks import.** If
+the number is blacked out on the scan, OCR reads punctuation and the
+statement is refused — accounts are grouped by that number, so guessing
+it would silently merge unrelated statements. Use an unredacted copy, or
+the original download.
+
 ## Architecture
 
 ```
@@ -115,6 +199,8 @@ statement_parsers/
     base.py                # shared dataclasses (Decimal money) + year inference
     regions.py             # Regions Bank parser
     servisfirst.py         # ServisFirst Bank parser
+    wellsfargo.py          # Wells Fargo parser
+    ocr.py                 # optional OCR fallback for scans (--ocr)
 consolidation.py           # dedup, account grouping, balance chaining,
                            # label variance, missing-month detection
 excel_writer.py            # workbook generation (xlsxwriter)
@@ -130,7 +216,7 @@ statement period, correctly handling periods that span Dec→Jan.
 
 ## Extensibility
 
-A third bank = one new module in `statement_parsers/` implementing:
+Another bank = one new module in `statement_parsers/` implementing:
 
 ```python
 BANK = "NewBank"

@@ -18,6 +18,14 @@ extraction quirks the parsers must survive:
   CHECKS table with an out-of-sequence flag, a DAILY BALANCES table,
   check-image caption pages, and multiple account blocks under one
   ``CHECKING ACCOUNTS`` banner.
+* Wells Fargo: the page-1 product title above a ``Month D, YYYY ...
+  Page N of M`` header, a summary block interleaved with a right-hand
+  column, wrapped description lines (one of which is itself
+  date-shaped), a check-number column, trailing disclosure pages, and
+  above all a transaction table whose credit and debit columns are
+  indistinguishable once extracted — including rows whose wording
+  points the *wrong* way, so only the ending-daily-balance arithmetic
+  can get the sign right.
 
 The values asserted by the tests are the synthetic ground truth defined
 here — chosen with round, obviously-fake numbers so the repo can be
@@ -494,6 +502,137 @@ def make_servisfirst_overdrawn(path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Wells Fargo fixtures (synthetic)
+#
+# Reproduces the extraction quirks the Wells Fargo parser must survive:
+# the page-1 title above a 'Month D, YYYY ... Page N of M' header, the
+# summary block interleaved with a right-hand column, wrapped description
+# lines, and — the hard one — a transaction table whose credit/debit
+# columns are indistinguishable in extracted text, so signs have to be
+# recovered from the ending-daily-balance column.
+# ---------------------------------------------------------------------------
+
+_WF_QUESTIONS = [
+    "Questions?",
+    "Available by phone Mon-Sat 7:00am-11:00pm Eastern",
+    "1-800-CALL-WELLS (1-800-225-5935)",
+    "Online: wellsfargo.com/biz",
+    "Write: Wells Fargo Bank, N.A. (000)",
+    "P.O. Box 0000",
+    "Portland, OR 00000-0000",
+]
+
+
+def make_wellsfargo_savings(path: Path) -> None:
+    """Business Market Rate Savings, January 2022.
+
+    Ground truth: opening 1,000.00; credits 7,000.16; debits 2,500.00;
+    closing 5,500.16 over 7 transactions. The 1/28 wire row carries no
+    directional wording, so the description hint guesses 'debit' and only
+    the ending-daily-balance arithmetic can correct it to a credit.
+    """
+    page1 = [
+        "Business Market Rate Savings",
+        "January 31, 2022 Page 1 of 2",
+        "",
+        "EXAMPLE COMPANY INC",
+        "123 EXAMPLE ST",
+        "ANYTOWN FL 00000",
+        "",
+        *_WF_QUESTIONS,
+        "",
+        "Your Business and Wells Fargo",
+        "",
+        "Statement period activity summary Account number: 0000001234",
+        "Beginning balance on 1/1 $1,000.00 EXAMPLE COMPANY INC",
+        "Deposits/Credits 7,000.16 Florida account terms and conditions apply",
+        "Withdrawals/Debits - 2,500.00 For Direct Deposit use",
+        "Ending balance on 1/31 $5,500.16 Routing Number (RTN): 000000000",
+        "",
+        "Interest summary",
+        "Interest paid this statement $0.16",
+        "Average collected balance $3,000.00",
+    ]
+    page2 = [
+        "January 31, 2022 Page 2 of 2",
+        "",
+        "Transaction history",
+        "",
+        "Deposits/ Withdrawals/ Ending daily",
+        "Date Description Credits Debits balance",
+        "1/05 Online Transfer From Example Company Inc Ref #Ab0000001 Business 2,000.00 3,000.00",
+        "Checking Quarterly Sales Tax",
+        "1/10 Online Transfer From Example Company Inc Ref #Ab0000002 Business 1,000.00",
+        "Checking Sales Tax Est",
+        "1/10 Online Transfer From Example Company Inc Ref #Ab0000003 Business 3,000.00 7,000.00",
+        "Checking Estimated Income Tax",
+        "1/18 Online Transfer to Example Company Inc Ref #Ab0000004 Business Checking 500.00 6,500.00",
+        "December Sales Tax",
+        "1/22 Online Transfer Ref #Ab0000005 to Business Card Xxxxxxxxxxxx0001 on 700.00",
+        "01/22/22",
+        "1/22 Online Transfer Ref #Ab0000006 to Business Card Xxxxxxxxxxxx0002 on 1,300.00 4,500.00",
+        "01/22/22",
+        "1/28 Wt Seq00000 Example Corp Srf# 0000000000000000 Trn# 000000000000 1,000.00 5,500.00",
+        "1/31 Interest Payment 0.16 5,500.16",
+        "Ending balance on 1/31 5,500.16",
+        "Totals $7,000.16 $2,500.00",
+        "",
+        "The Ending Daily Balance does not reflect any pending withdrawals or holds on deposited funds.",
+        "",
+        "Monthly service fee summary",
+        "Fee period 01/01/2022 - 01/31/2022 Standard monthly service fee $5.00 You paid $0.00",
+        "",
+        "IMPORTANT ACCOUNT INFORMATION",
+        "NEW YORK CITY CUSTOMERS ONLY -- Pursuant to New York City regulations,",
+        "",
+        "Account Balance Calculation Worksheet",
+        "1. Use the following worksheet to calculate your overall account balance.",
+    ]
+    _write_pages(path, [page1, page2])
+
+
+def make_wellsfargo_checking(path: Path) -> None:
+    """Business Choice Checking, February 2022 — exercises the check-number
+    column and a period that spans a month boundary.
+
+    Ground truth: opening 5,500.16; credits 4,000.00; debits 1,250.00;
+    closing 8,250.16 over 4 transactions, one of them check 1001.
+    """
+    page1 = [
+        "Business Choice Checking",
+        "February 28, 2022 Page 1 of 1",
+        "",
+        "EXAMPLE COMPANY INC",
+        "123 EXAMPLE ST",
+        "ANYTOWN FL 00000",
+        "",
+        *_WF_QUESTIONS,
+        "",
+        "Statement period activity summary Account number: 0000005678",
+        "Beginning balance on 2/1 $5,500.16 EXAMPLE COMPANY INC",
+        "Deposits/Credits 4,000.00 Florida account terms and conditions apply",
+        "Withdrawals/Debits - 1,250.00 For Direct Deposit use",
+        "Ending balance on 2/28 $8,250.16 Routing Number (RTN): 000000000",
+        "",
+        "Transaction history",
+        "",
+        "Check Deposits/ Withdrawals/ Ending daily",
+        "Date Number Description Credits Debits balance",
+        "2/03 Deposit 3,000.00 8,500.16",
+        "2/09 1001 Check 1,000.00 7,500.16",
+        "2/14 Purchase authorized on 02/12 Example Supply Anytown FL 250.00 7,250.16",
+        "Card 0000",
+        "2/25 Business to Business ACH Example Client Payment 1,000.00 8,250.16",
+        "Ending balance on 2/28 8,250.16",
+        "Totals $4,000.00 $1,250.00",
+        "",
+        "Monthly service fee summary",
+        "IMPORTANT ACCOUNT INFORMATION",
+    ]
+    _write_pages(path, [page1])
+
+
+# ---------------------------------------------------------------------------
 # Negative-path fixtures
 # ---------------------------------------------------------------------------
 
@@ -531,6 +670,8 @@ ALL_FIXTURES = {
     "servisfirst_checking_2022-09.pdf": make_servisfirst,
     "servisfirst_multi_account.pdf": make_servisfirst_multi_account,
     "servisfirst_overdrawn.pdf": make_servisfirst_overdrawn,
+    "wellsfargo_savings_2022-01.pdf": make_wellsfargo_savings,
+    "wellsfargo_checking_2022-02.pdf": make_wellsfargo_checking,
     "regions_checking_2022-01_redownload.pdf": make_regions_dec,
     "regions_personal_2022-02.pdf": make_regions_personal,
     "unknown_bank.pdf": make_unrecognized_bank,
@@ -545,6 +686,8 @@ END_TO_END_FIXTURES = [
     "regions_checking_2022-02.pdf",
     "regions_checking_2022-05.pdf",
     "servisfirst_checking_2022-09.pdf",
+    "wellsfargo_savings_2022-01.pdf",
+    "wellsfargo_checking_2022-02.pdf",
     "regions_checking_2022-01_redownload.pdf",
     "unknown_bank.pdf",
     "scanned_image_only.pdf",
