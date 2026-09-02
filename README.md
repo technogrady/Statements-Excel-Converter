@@ -172,13 +172,23 @@ come back as `3`:
 * **Accepted statements are still flagged.** Every OCR'd statement gets
   an `OCR:` note on the Inventory tab telling you to spot-check it, and
   the run summary counts them.
-* **OCR never overrides a readable text layer.** It runs only for files
-  the text extractors couldn't parse at all, plus part-rescanned files
-  where one page lost its text while another kept it. A statement that
-  parses but doesn't balance is a real discrepancy to report — not a scan
-  — so it is left alone rather than costing minutes of OCR.
+* **OCR never overrides, or blurs, a readable text layer.** It is gated
+  on the *text*, not the outcome: it runs only when no extractor found
+  any text, plus part-rescanned files where one page lost its text while
+  another kept it. A file that has text but doesn't parse or balance is a
+  real problem to report — re-reading the same pixels can only cost
+  minutes and make the diagnosis vaguer.
+* **A rejected scan still says why.** "The scan has no text" and "the
+  scan read fine but its account number is blacked out" need completely
+  different fixes, so the Inventory row names the actual one.
 
 Expect a few seconds per page. Only the scanned files pay that cost.
+
+One thing worth knowing: **a redacted account number blocks import.** If
+the number is blacked out on the scan, OCR reads punctuation and the
+statement is refused — accounts are grouped by that number, so guessing
+it would silently merge unrelated statements. Use an unredacted copy, or
+the original download.
 
 ## Architecture
 

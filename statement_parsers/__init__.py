@@ -20,6 +20,7 @@ from .base import (
     FileResult,
     ParsedStatement,
     Transaction,
+    money_str,
 )
 
 __all__ = [
@@ -148,12 +149,13 @@ def parse_pdf(path: str | os.PathLike, ocr: bool = False) -> FileResult:
     reconciles (or when pdfplumber produced nothing usable at all).
 
     ``ocr=True`` adds a last stage for PDFs with no usable text layer at all
-    (scans): pages are rendered and machine-read. It runs only when the text
-    extractors produced no parse, or when some page carried no text while
-    another did (a part-rescanned file) — a statement that merely fails to
-    reconcile is a real discrepancy to report, not a scan to re-read, and
-    OCR-ing it would only cost minutes. An OCR parse is accepted only when it
-    reconciles, and is marked with ``via_ocr`` plus a spot-check note.
+    (scans): pages are rendered and machine-read. It is gated on the *text*,
+    not on the outcome — it runs only when no extractor found any text, or
+    when some page carried none while another did (a part-rescanned file).
+    A file that has text but fails to parse or reconcile is a real problem to
+    report, not a scan to re-read, and re-reading it as pixels would only cost
+    minutes and blur the diagnosis. An OCR parse is imported only when it
+    reconciles, and is then marked with ``via_ocr`` plus a spot-check note.
     """
     filename = os.path.basename(str(path))
     pages: list[str] | None = None
@@ -198,36 +200,67 @@ def parse_pdf(path: str | os.PathLike, ocr: bool = False) -> FileResult:
             if result.status != STATUS_OK and fitz_result.status == STATUS_OK:
                 result = fitz_result
 
-    if ocr and (result.status != STATUS_OK or _has_blank_page(pages)):
-        ocr_result = _ocr_attempt(path, filename)
-        if ocr_result is not None:
-            return ocr_result
+    if ocr:
+        sources = [src for src in (pages, fitz_pages) if src]
+        has_text = any(any(page.strip() for page in src) for src in sources)
+        if not has_text or any(_has_blank_page(src) for src in sources):
+            ocr_result = _ocr_attempt(path, filename)
+            # A failed OCR attempt replaces the original verdict only when the
+            # original had nothing to say. A file whose text layer gave a real
+            # diagnosis (UNRECOGNIZED, a parse error) keeps it: re-reading text
+            # as pixels can only blur that, never sharpen it.
+            if ocr_result is not None and (ocr_result.status == STATUS_OK or not has_text):
+                return ocr_result
 
     return result
 
 
-def _has_blank_page(pages: list[str] | None) -> bool:
+def _has_blank_page(pages: list[str]) -> bool:
     """A page with no text alongside a page that has some — i.e. part of the
     file was rescanned, so a text-layer parse is silently missing whole pages."""
-    if not pages:
-        return False
     return any(not p.strip() for p in pages) and any(p.strip() for p in pages)
 
 
 def _ocr_attempt(path: str | os.PathLike, filename: str) -> FileResult | None:
     """Render-and-machine-read the file. None means 'nothing better to offer'.
 
-    Only a reconciling OCR parse is accepted: OCR misreads digits, and an
+    Only a *reconciling* OCR parse is imported: OCR misreads digits, and an
     unreconciled OCR result is a guess with wrong numbers in it, which is
     worse than a file honestly reported as unreadable.
+
+    An OCR run that read the page but couldn't be trusted still reports *why*
+    rather than falling back to a bare "no extractable text". The distinction
+    matters to whoever has to fix the file: "the scan has no text" and "the
+    scan read fine but its account number is blacked out" call for completely
+    different actions, and only the second one is true here.
     """
     pages = _ocr_pages(path)
     if pages is None or not any(p.strip() for p in pages):
         return None
     ocr_result, _ = _run_pipeline(pages, filename)
-    if not _fully_reconciled(ocr_result):
-        return None
-    ocr_result.via_ocr = True
-    for statement in ocr_result.statements:
-        statement.notes.insert(0, OCR_NOTE)
-    return ocr_result
+    if _fully_reconciled(ocr_result):
+        ocr_result.via_ocr = True
+        for statement in ocr_result.statements:
+            statement.notes.insert(0, OCR_NOTE)
+        return ocr_result
+
+    if ocr_result.status == STATUS_OK:
+        # Parsed, but the figures don't add up — exactly what a misread digit
+        # looks like. Report the discrepancy; never import the numbers.
+        deltas = "; ".join(
+            f"{money_str(s.reconciliation_delta)} off"
+            for s in ocr_result.statements if not s.reconciled
+        )
+        detail = (
+            f"OCR read this scan but the figures don't reconcile ({deltas}) — "
+            "likely a misread digit. Not imported; check the PDF or supply the "
+            "original download."
+        )
+    elif ocr_result.status == STATUS_UNRECOGNIZED:
+        detail = (
+            "OCR read this scan but no bank signature was recognized in the "
+            f"result: {ocr_result.detail}"
+        )
+    else:
+        detail = f"OCR read this scan but parsing failed — {ocr_result.detail}"
+    return FileResult(filename, STATUS_PARSE_ERROR, detail=detail)

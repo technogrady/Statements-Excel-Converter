@@ -12,7 +12,12 @@ import pytest
 
 import statement_parsers as sp
 from statement_parsers import ocr
-from statement_parsers.base import STATUS_NO_TEXT, STATUS_OK, STATUS_PARSE_ERROR
+from statement_parsers.base import (
+    STATUS_NO_TEXT,
+    STATUS_OK,
+    STATUS_PARSE_ERROR,
+    STATUS_UNRECOGNIZED,
+)
 
 # A complete, reconciling Wells Fargo savings statement — stands in for what
 # OCR recovers from a scanned page.
@@ -146,18 +151,6 @@ class TestParsePdfOcrStage:
         self, fixture_dir, monkeypatch
     ):
         monkeypatch.setattr(sp, "_ocr_pages", lambda path: None)
-        r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
-        assert r.status == STATUS_NO_TEXT
-        assert r.via_ocr is False
-
-    def test_misread_ocr_is_rejected_rather_than_imported(self, fixture_dir, monkeypatch):
-        """A digit OCR got wrong breaks reconciliation. Importing those numbers
-        would be worse than reporting the file unread, so it is declined."""
-        misread = [
-            _SCANNED_TEXT[0],
-            _SCANNED_TEXT[1].replace("2,000.00 3,000.00", "9,000.00 3,000.00"),
-        ]
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path: misread)
         r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
         assert r.status == STATUS_NO_TEXT
         assert r.via_ocr is False
@@ -302,3 +295,58 @@ class TestRealOCR:
         assert len(stmt.transactions) == 8
         assert str(stmt.opening_balance) == "1000.00"
         assert str(stmt.closing_balance) == "5500.16"
+
+
+class TestOcrFailuresExplainThemselves:
+    """OCR that read the page but couldn't be trusted must say why. "The scan
+    has no text" and "the scan read fine but its account number is blacked
+    out" call for completely different fixes."""
+
+    def test_misread_digit_reports_the_discrepancy(self, fixture_dir, monkeypatch):
+        misread = [
+            _SCANNED_TEXT[0],
+            _SCANNED_TEXT[1].replace("2,000.00 3,000.00", "9,000.00 3,000.00"),
+        ]
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path: misread)
+        r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
+        assert r.status == STATUS_PARSE_ERROR
+        assert "don't reconcile" in r.detail
+        assert "misread digit" in r.detail
+        assert not r.statements  # the wrong numbers are never imported
+
+    def test_redacted_account_number_reports_the_real_reason(
+        self, fixture_dir, monkeypatch
+    ):
+        redacted = [
+            _SCANNED_TEXT[0].replace("Account number: 0000001234",
+                                     "Account number: |<"),
+            _SCANNED_TEXT[1],
+        ]
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path: redacted)
+        r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
+        assert r.status == STATUS_PARSE_ERROR
+        assert "OCR read this scan" in r.detail
+        assert "account number not found" in r.detail
+
+    def test_unknown_bank_in_ocr_text_says_so(self, fixture_dir, monkeypatch):
+        monkeypatch.setattr(
+            sp, "_ocr_pages", lambda path: ["Example National Bank of Testing\n"]
+        )
+        r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
+        assert r.status == STATUS_PARSE_ERROR
+        assert "no bank signature was recognized" in r.detail
+
+
+class TestOcrNeverDegradesADiagnosis:
+    """OCR is gated on whether any text was found, not on the outcome. A file
+    that has a text layer already has a verdict worth more than a machine
+    re-reading of the same pixels."""
+
+    def test_unrecognized_text_pdf_keeps_its_verdict(self, fixture_dir, monkeypatch):
+        def _boom(path):
+            raise AssertionError("a file with a readable text layer must not be OCR'd")
+
+        monkeypatch.setattr(sp, "_ocr_pages", _boom)
+        r = sp.parse_pdf(fixture_dir / "unknown_bank.pdf", ocr=True)
+        assert r.status == STATUS_UNRECOGNIZED
+        assert "Example National Bank" in r.detail

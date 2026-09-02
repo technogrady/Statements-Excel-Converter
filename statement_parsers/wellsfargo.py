@@ -270,11 +270,29 @@ def _resolve_period_start(month: int, day: int, period_end):
     return None
 
 
-def parse(pages: list[str], filename: str) -> list[ParsedStatement]:
-    lines: list[str] = []
+def _clean_pages(pages: list[str]) -> list[str]:
+    """Flatten to one non-empty line stream with runs of whitespace collapsed.
+
+    Nothing here reads column positions, and OCR output pads columns with
+    long space runs (``Date          Description``), so normalizing makes
+    machine-read and pdfplumber text the same shape.
+    """
+    out: list[str] = []
     for page in pages:
-        lines.extend(ln.strip() for ln in (page or "").splitlines())
-    lines = [ln for ln in lines if ln]
+        for line in (page or "").splitlines():
+            line = re.sub(r"\s+", " ", line).strip()
+            if line:
+                out.append(line)
+    return out
+
+
+# The 'WELLS FARGO' wordmark sits at the top right of every page. It is an
+# image in a downloaded PDF, but OCR reads it and it lands on the title line.
+_WORDMARK_TAIL_RE = re.compile(r"[\s|]*\b(WELLS\s*FARGO|WELLS|FARGO)\s*$", re.IGNORECASE)
+
+
+def parse(pages: list[str], filename: str) -> list[ParsedStatement]:
+    lines = _clean_pages(pages)
 
     if sum(1 for ln in lines if _SUMMARY_HDR_RE.match(ln)) > 1:
         raise ValueError(
@@ -442,17 +460,24 @@ def _differs(a: str, b: str) -> bool:
 
 def _find_label(lines: list[str], pages: list[str]) -> str:
     """The product title, printed directly above the page-1 date header."""
-    page1 = [ln.strip() for ln in (pages[0] if pages else "").splitlines() if ln.strip()]
+    page1 = _clean_pages(pages[:1])
     for i, line in enumerate(page1[:8]):
         if _STMT_DATE_RE.match(line):
             for candidate in reversed(page1[:i]):
-                if re.search(r"[A-Za-z]", candidate) and not _SIGNATURES.match(candidate):
-                    return candidate
+                cleaned = _clean_label(candidate)
+                if cleaned and not _SIGNATURES.match(cleaned):
+                    return cleaned
             break
     for line in page1:
         if re.search(r"[A-Za-z]", line) and not _STMT_DATE_RE.match(line):
-            return line
+            return _clean_label(line)
     return ""
+
+
+def _clean_label(line: str) -> str:
+    """A product title with the page's wordmark trimmed off its tail."""
+    label = _WORDMARK_TAIL_RE.sub("", line).strip()
+    return label if re.search(r"[A-Za-z]", label) else ""
 
 
 def _assign_signs(rows: list[_Row], opening: Decimal, closing: Decimal,

@@ -251,3 +251,58 @@ def test_end_to_end_files_parse(fixture_dir):
         r = parse_pdf(fixture_dir / name)
         assert r.status == STATUS_OK, r.detail
         assert r.statements[0].reconciled, r.statements[0].notes
+
+
+class TestOcrShapedInput:
+    """OCR output pads columns with long space runs and reads the WELLS FARGO
+    wordmark as text onto the title line. Both are normalized away."""
+
+    _PAGES = [
+        "Business Market Rate Savings                        WELLS\n"
+        "January 31, 2022 @ Page 1 of 2                            FARGO\n"
+        "Online: wellsfargo.com/biz\n"
+        "Statement period activity summary        Account number: 0000001234\n"
+        "Beginning balance on 1/1              $1,000.00      EXAMPLE COMPANY INC\n"
+        "Deposits/Credits                       2,000.00\n"
+        "Withdrawals/Debits           -   500.00\n"
+        "Ending balance on 1/31               $2,500.00\n",
+        "January 31, 2022 m Page 2 of 2\n"
+        "Transaction history\n"
+        "Deposits/          Withdrawals/          Ending daily\n"
+        "Date       Description                       Credits      Debits    balance\n"
+        "1/05       Online Transfer From Example Inc Ref #Ab01    2,000.00    3,000.00\n"
+        "1/18       Online Transfer to Example Inc Ref #Ab02          500.00  2,500.00\n"
+        "Ending balance on 1/31                                            2,500.00\n"
+        "ES EE TRIES SES ORES EE Te\n"
+        "Totals                                    $2,000.00   $500.00\n",
+    ]
+
+    def test_parses_and_reconciles(self):
+        stmt = wellsfargo.parse(self._PAGES, "scan.pdf")[0]
+        assert stmt.reconciled, stmt.notes
+        assert stmt.notes == []
+        assert [t.amount for t in stmt.transactions] == [D("2000.00"), D("-500.00")]
+
+    def test_wordmark_is_trimmed_from_the_label(self):
+        stmt = wellsfargo.parse(self._PAGES, "scan.pdf")[0]
+        assert stmt.account_label == "Business Market Rate Savings"
+
+    def test_description_whitespace_is_collapsed(self):
+        stmt = wellsfargo.parse(self._PAGES, "scan.pdf")[0]
+        assert stmt.transactions[0].description == (
+            "Online Transfer From Example Inc Ref #Ab01"
+        )
+
+    def test_scan_speckle_line_is_not_a_transaction(self):
+        stmt = wellsfargo.parse(self._PAGES, "scan.pdf")[0]
+        blob = " ".join(t.description for t in stmt.transactions)
+        assert "TRIES" not in blob
+
+    def test_redacted_account_number_is_refused_by_name(self):
+        """A blacked-out account number OCRs to punctuation. Grouping depends on
+        that number, so the statement is refused with a message naming it."""
+        pages = [self._PAGES[0].replace("Account number: 0000001234",
+                                        "Account number: |<"),
+                 self._PAGES[1]]
+        with pytest.raises(ValueError, match="account number not found"):
+            wellsfargo.parse(pages, "redacted.pdf")
