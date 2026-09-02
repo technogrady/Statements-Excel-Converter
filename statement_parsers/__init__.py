@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-from . import regions, servisfirst
+from . import regions, servisfirst, wellsfargo
 from .base import (
     STATUS_ENCRYPTED,
     STATUS_NO_TEXT,
@@ -30,7 +30,10 @@ __all__ = [
     "Transaction",
 ]
 
-PARSERS = [regions, servisfirst]
+# Order matters: ServisFirst's last-resort signature is a generic
+# reverse-side disclosure footer, so banks with an unambiguous wordmark are
+# matched ahead of it.
+PARSERS = [regions, wellsfargo, servisfirst]
 
 
 def detect_bank(text: str):

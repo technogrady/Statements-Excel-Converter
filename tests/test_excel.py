@@ -40,6 +40,8 @@ class TestWorkbookStructure:
     def test_one_sheet_per_account(self, wb):
         assert "Regions_x1000" in wb.sheetnames
         assert "ServisFirst_x5678" in wb.sheetnames
+        assert "Wells Fargo_x1234" in wb.sheetnames
+        assert "Wells Fargo_x5678" in wb.sheetnames
 
     def test_frozen_header_and_autofilter(self, wb):
         for name in ("Inventory", "Regions_x1000", "ServisFirst_x5678"):
@@ -52,7 +54,7 @@ class TestInventory:
     def test_row_per_file_with_statuses(self, wb):
         rows = inventory_rows(wb)
         by_file = {r["File"]: r for r in rows}
-        assert len(rows) == 8  # 5 statements (incl. dup) + 3 failures
+        assert len(rows) == 10  # 7 statements (incl. dup) + 3 failures
         assert by_file["regions_checking_2022-01.pdf"]["Reconciled"] == "OK"
         assert by_file["regions_checking_2022-01_redownload.pdf"]["Reconciled"] == "DUPLICATE"
         assert "DUPLICATE of" in by_file["regions_checking_2022-01_redownload.pdf"]["Notes"]
@@ -60,6 +62,8 @@ class TestInventory:
         assert "Example National Bank" in by_file["unknown_bank.pdf"]["Notes"]
         assert by_file["scanned_image_only.pdf"]["Reconciled"] == "NO_TEXT (possible scan)"
         assert by_file["password_protected.pdf"]["Reconciled"] == "ENCRYPTED"
+        assert by_file["wellsfargo_savings_2022-01.pdf"]["Reconciled"] == "OK"
+        assert by_file["wellsfargo_checking_2022-02.pdf"]["Reconciled"] == "OK"
 
     def test_statement_row_values(self, wb):
         rows = inventory_rows(wb)

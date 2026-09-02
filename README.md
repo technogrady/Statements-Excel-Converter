@@ -12,8 +12,9 @@ with:
    the penny, plus a per-account **Coverage Summary** (labels used over
    time, balance-chain status, missing months).
 
-Supported banks: **Regions Bank** and **ServisFirst Bank**. Adding a
-third bank is one new parser module (see [Extensibility](#extensibility)).
+Supported banks: **Regions Bank**, **ServisFirst Bank** and **Wells
+Fargo**. Adding another bank is one new parser module (see
+[Extensibility](#extensibility)).
 
 ## Windows setup (easy — start here)
 
@@ -89,7 +90,8 @@ printed to stdout.
   show as `FAILED (Δ $x.xx)` on the Inventory tab; parsed counts and
   totals are also cross-checked against the statement's own summary
   figures (Regions section totals; ServisFirst `9 Deposits/Credits` /
-  `22 Checks/Debits` declarations, check-image captions).
+  `22 Checks/Debits` declarations, check-image captions; Wells Fargo
+  `Deposits/Credits` / `Withdrawals/Debits` summary totals).
 * **Balance chaining (per account)** — each statement's closing balance
   must equal the next statement's opening balance. Chains that link
   across a product-name change prove "renamed account, same account";
@@ -106,6 +108,36 @@ printed to stdout.
   Individual transactions are never deduped across statements —
   recurring identical transactions are legitimate.
 
+### Wells Fargo: how credits and debits are told apart
+
+Wells Fargo prints deposits and withdrawals in two *side-by-side money
+columns*, and PDF text extraction throws the column geometry away — a
+row comes out as `1/5 Online Transfer From ... 5,800.00 8,564.43` with
+nothing to say which column the `5,800.00` sat in. The parser therefore
+recovers the sign arithmetically rather than guessing:
+
+* the **Ending daily balance** column pins the exact net change of every
+  run of rows it closes, so each run's signs are *solved* for;
+* the description ("Transfer **From**" = credit, "Transfer ... **to**" =
+  debit, `Interest Payment`, `Purchase`, …) only picks between
+  assignments that are all arithmetically valid;
+* a run the balance column cannot explain keeps its description-hinted
+  signs, gets a note on the Inventory tab, and fails reconciliation —
+  never a silently reversed transaction;
+* the statement's own `Deposits/Credits` / `Withdrawals/Debits` totals
+  are cross-checked afterwards.
+
+**Scope:** one deposit account per PDF. Wells Fargo also issues
+*combined* statements carrying several accounts in one file; those are
+reported per file with "combined statement with more than one account is
+not supported" rather than half-imported. Split the PDF by account and
+re-run.
+
+**Scanned statements:** like every other bank here, Wells Fargo PDFs
+must carry a real text layer. A statement that was printed and scanned
+back in has no extractable text and is reported `NO_TEXT (possible
+scan)`; OCR it first (e.g. `ocrmypdf in.pdf out.pdf`) and re-run.
+
 ## Architecture
 
 ```
@@ -115,6 +147,7 @@ statement_parsers/
     base.py                # shared dataclasses (Decimal money) + year inference
     regions.py             # Regions Bank parser
     servisfirst.py         # ServisFirst Bank parser
+    wellsfargo.py          # Wells Fargo parser
 consolidation.py           # dedup, account grouping, balance chaining,
                            # label variance, missing-month detection
 excel_writer.py            # workbook generation (xlsxwriter)
@@ -130,7 +163,7 @@ statement period, correctly handling periods that span Dec→Jan.
 
 ## Extensibility
 
-A third bank = one new module in `statement_parsers/` implementing:
+Another bank = one new module in `statement_parsers/` implementing:
 
 ```python
 BANK = "NewBank"

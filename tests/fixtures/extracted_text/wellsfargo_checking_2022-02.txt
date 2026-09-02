@@ -1,0 +1,30 @@
+===== page 1 =====
+Business Choice Checking
+February 28, 2022 Page 1 of 1
+EXAMPLE COMPANY INC
+123 EXAMPLE ST
+ANYTOWN FL 00000
+Questions?
+Available by phone Mon-Sat 7:00am-11:00pm Eastern
+1-800-CALL-WELLS (1-800-225-5935)
+Online: wellsfargo.com/biz
+Write: Wells Fargo Bank, N.A. (000)
+P.O. Box 0000
+Portland, OR 00000-0000
+Statement period activity summary Account number: 0000005678
+Beginning balance on 2/1 $5,500.16 EXAMPLE COMPANY INC
+Deposits/Credits 4,000.00 Florida account terms and conditions apply
+Withdrawals/Debits - 1,250.00 For Direct Deposit use
+Ending balance on 2/28 $8,250.16 Routing Number (RTN): 000000000
+Transaction history
+Check Deposits/ Withdrawals/ Ending daily
+Date Number Description Credits Debits balance
+2/03 Deposit 3,000.00 8,500.16
+2/09 1001 Check 1,000.00 7,500.16
+2/14 Purchase authorized on 02/12 Example Supply Anytown FL 250.00 7,250.16
+Card 0000
+2/25 Business to Business ACH Example Client Payment 1,000.00 8,250.16
+Ending balance on 2/28 8,250.16
+Totals $4,000.00 $1,250.00
+Monthly service fee summary
+IMPORTANT ACCOUNT INFORMATION
