@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 
+from . import ocr as _ocr
 from . import regions, servisfirst, wellsfargo
 from .base import (
     STATUS_ENCRYPTED,
@@ -23,7 +24,9 @@ from .base import (
 
 __all__ = [
     "PARSERS",
+    "OCR_NOTE",
     "detect_bank",
+    "ocr_availability",
     "parse_pdf",
     "FileResult",
     "ParsedStatement",
@@ -57,6 +60,23 @@ def _looks_encrypted(exc: BaseException) -> bool:
             return True
         cur = cur.__cause__ or cur.__context__
     return False
+
+
+OCR_NOTE = (
+    "OCR: this statement had no text layer — every figure above was "
+    "machine-read from a scanned page. It reconciles, but spot-check it "
+    "against the PDF."
+)
+
+
+def ocr_availability() -> tuple[bool, str]:
+    """(usable, reason) for the --ocr path; see statement_parsers.ocr."""
+    return _ocr.availability()
+
+
+def _ocr_pages(path: str | os.PathLike) -> list[str] | None:
+    """Rendered-and-machine-read page text, or None when OCR isn't possible."""
+    return _ocr.ocr_pages(path)
 
 
 def _pymupdf_pages(path: str | os.PathLike) -> list[str] | None:
@@ -96,7 +116,8 @@ def _run_pipeline(pages: list[str], filename: str) -> tuple[FileResult, object |
     caller can reuse a successfully-detected parser for a fallback re-extract."""
     if not any(p.strip() for p in pages):
         return (FileResult(filename, STATUS_NO_TEXT,
-                           detail="no extractable text (possible scan)"), None)
+                           detail="no extractable text (possible scan) — "
+                                  "retry with --ocr to machine-read it"), None)
 
     parser = detect_bank(pages[0]) or detect_bank("\n".join(pages))
     if parser is None:
@@ -114,7 +135,7 @@ def _fully_reconciled(result: FileResult) -> bool:
     )
 
 
-def parse_pdf(path: str | os.PathLike) -> FileResult:
+def parse_pdf(path: str | os.PathLike, ocr: bool = False) -> FileResult:
     """Extract and parse one PDF. Never raises — one bad PDF must never
     abort the run; failures come back as a FileResult status.
 
@@ -125,6 +146,14 @@ def parse_pdf(path: str | os.PathLike) -> FileResult:
     AND reconciles is returned immediately and never re-extracted, so the
     common case can't regress. The PyMuPDF result is preferred only when it
     reconciles (or when pdfplumber produced nothing usable at all).
+
+    ``ocr=True`` adds a last stage for PDFs with no usable text layer at all
+    (scans): pages are rendered and machine-read. It runs only when the text
+    extractors produced no parse, or when some page carried no text while
+    another did (a part-rescanned file) — a statement that merely fails to
+    reconcile is a real discrepancy to report, not a scan to re-read, and
+    OCR-ing it would only cost minutes. An OCR parse is accepted only when it
+    reconciles, and is marked with ``via_ocr`` plus a spot-check note.
     """
     filename = os.path.basename(str(path))
     pages: list[str] | None = None
@@ -167,6 +196,38 @@ def parse_pdf(path: str | os.PathLike) -> FileResult:
             if _fully_reconciled(fitz_result):
                 return fitz_result
             if result.status != STATUS_OK and fitz_result.status == STATUS_OK:
-                return fitz_result
+                result = fitz_result
+
+    if ocr and (result.status != STATUS_OK or _has_blank_page(pages)):
+        ocr_result = _ocr_attempt(path, filename)
+        if ocr_result is not None:
+            return ocr_result
 
     return result
+
+
+def _has_blank_page(pages: list[str] | None) -> bool:
+    """A page with no text alongside a page that has some — i.e. part of the
+    file was rescanned, so a text-layer parse is silently missing whole pages."""
+    if not pages:
+        return False
+    return any(not p.strip() for p in pages) and any(p.strip() for p in pages)
+
+
+def _ocr_attempt(path: str | os.PathLike, filename: str) -> FileResult | None:
+    """Render-and-machine-read the file. None means 'nothing better to offer'.
+
+    Only a reconciling OCR parse is accepted: OCR misreads digits, and an
+    unreconciled OCR result is a guess with wrong numbers in it, which is
+    worse than a file honestly reported as unreadable.
+    """
+    pages = _ocr_pages(path)
+    if pages is None or not any(p.strip() for p in pages):
+        return None
+    ocr_result, _ = _run_pipeline(pages, filename)
+    if not _fully_reconciled(ocr_result):
+        return None
+    ocr_result.via_ocr = True
+    for statement in ocr_result.statements:
+        statement.notes.insert(0, OCR_NOTE)
+    return ocr_result

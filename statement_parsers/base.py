@@ -82,6 +82,7 @@ class FileResult:
     status: str  # STATUS_* above
     statements: list[ParsedStatement] = field(default_factory=list)
     detail: str = ""  # hint text (unrecognized) or error message (parse error / encrypted)
+    via_ocr: bool = False  # text was machine-read from a scan (see --ocr)
 
 
 _MONEY_RE = re.compile(r"^\(?\$?\s*(-?)([\d,]*\.?\d{0,2})\)?(-?)$")

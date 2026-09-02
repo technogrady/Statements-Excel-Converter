@@ -1,8 +1,7 @@
 # Bank Statement → Excel Consolidation Tool
 
-Parses a folder of bank statement PDFs (digitally generated text — not
-scans) and produces a single Excel workbook (`Bank_Statements.xlsx`)
-with:
+Parses a folder of bank statement PDFs and produces a single Excel
+workbook (`Bank_Statements.xlsx`) with:
 
 1. **One worksheet per bank account** — every transaction from every
    statement for that account, sorted by date, statement-level
@@ -75,13 +74,17 @@ To update the tool later, `cd` back into the folder and run `git pull`.
 
 ```bash
 pip install -r requirements.txt
-python parse_statements.py <input_folder> [-o output.xlsx]
+python parse_statements.py <input_folder> [-o output.xlsx] [--ocr]
 ```
 
 The folder is searched recursively for `*.pdf` (case-insensitive). One
 bad PDF never aborts the run — encrypted, unrecognized, scanned-image,
 or unparsable files become flagged Inventory rows, and a run summary is
 printed to stdout.
+
+Statements are expected to carry a real text layer (i.e. downloaded from
+the bank, not scanned). Add `--ocr` to machine-read scanned ones too —
+see [Scanned statements (`--ocr`)](#scanned-statements---ocr).
 
 ## What the tool checks for you
 
@@ -133,10 +136,49 @@ reported per file with "combined statement with more than one account is
 not supported" rather than half-imported. Split the PDF by account and
 re-run.
 
-**Scanned statements:** like every other bank here, Wells Fargo PDFs
-must carry a real text layer. A statement that was printed and scanned
-back in has no extractable text and is reported `NO_TEXT (possible
-scan)`; OCR it first (e.g. `ocrmypdf in.pdf out.pdf`) and re-run.
+**Scanned statements:** a Wells Fargo statement that was printed and
+scanned back in has no text layer at all. Run with `--ocr` to machine-read
+it — see [Scanned statements (`--ocr`)](#scanned-statements---ocr).
+
+## Scanned statements (`--ocr`)
+
+Statements that were printed and scanned back in carry no text layer, so
+every extractor returns nothing and the file is reported `NO_TEXT
+(possible scan)`. Add `--ocr` to render those pages and machine-read them
+instead:
+
+```bash
+python parse_statements.py ./statements --ocr
+```
+
+```powershell
+statements "C:\path\to\folder" --ocr
+```
+
+It needs the **Tesseract** OCR engine (`install.bat` installs it on
+Windows; `brew install tesseract` on macOS, `sudo apt install
+tesseract-ocr` on Linux). Nothing extra to pip-install — pages are
+rendered with PyMuPDF and handed to the `tesseract` binary directly. If
+the engine is missing the run continues without OCR and says so, with
+install instructions; set `TESSERACT_CMD` if it lives somewhere unusual.
+
+Guard rails, because OCR *guesses* at characters and a smudged `8` can
+come back as `3`:
+
+* **A statement is only accepted if it reconciles.** `opening +
+  Σ(transactions) == closing` to the penny is a demanding check on
+  machine-read digits: one misread amount breaks it, and the file is then
+  reported unread rather than imported with wrong numbers in it.
+* **Accepted statements are still flagged.** Every OCR'd statement gets
+  an `OCR:` note on the Inventory tab telling you to spot-check it, and
+  the run summary counts them.
+* **OCR never overrides a readable text layer.** It runs only for files
+  the text extractors couldn't parse at all, plus part-rescanned files
+  where one page lost its text while another kept it. A statement that
+  parses but doesn't balance is a real discrepancy to report — not a scan
+  — so it is left alone rather than costing minutes of OCR.
+
+Expect a few seconds per page. Only the scanned files pay that cost.
 
 ## Architecture
 
@@ -148,6 +190,7 @@ statement_parsers/
     regions.py             # Regions Bank parser
     servisfirst.py         # ServisFirst Bank parser
     wellsfargo.py          # Wells Fargo parser
+    ocr.py                 # optional OCR fallback for scans (--ocr)
 consolidation.py           # dedup, account grouping, balance chaining,
                            # label variance, missing-month detection
 excel_writer.py            # workbook generation (xlsxwriter)

@@ -9,7 +9,9 @@ REM    1. Make sure Python is installed (installs it with winget if missing)
 REM    2. Create a self-contained virtual environment in the .venv folder
 REM       and install the packages the tool needs INTO THAT FOLDER ONLY
 REM       (nothing is installed system-wide, so system packages are untouched)
-REM    3. Add this folder to your PATH so you can run  statements  anywhere
+REM    3. Install Tesseract OCR, used by the optional --ocr switch to read
+REM       statements that were scanned rather than downloaded
+REM    4. Add this folder to your PATH so you can run  statements  anywhere
 REM ===========================================================================
 
 echo ==========================================================
@@ -70,7 +72,7 @@ if not exist "%VENV_PY%" (
 echo Installing the packages the tool needs (this can take a minute)...
 echo.
 "%VENV_PY%" -m pip install --upgrade pip
-"%VENV_PY%" -m pip install pdfplumber pandas XlsxWriter openpyxl
+"%VENV_PY%" -m pip install pdfplumber pymupdf pandas XlsxWriter openpyxl
 if errorlevel 1 (
     echo.
     echo Something went wrong installing the packages - see the messages above.
@@ -80,7 +82,30 @@ if errorlevel 1 (
 )
 echo.
 
-REM --- 3. Add this folder to the user PATH -----------------------------------
+REM --- 3. Tesseract OCR (optional) -------------------------------------------
+REM  Only needed for the  --ocr  switch, which reads statements that were
+REM  scanned instead of downloaded. Everything else works without it, so a
+REM  failure here is not fatal.
+tesseract --version >nul 2>&1
+if errorlevel 1 (
+    echo Installing Tesseract OCR ^(only needed for scanned statements^)...
+    winget install -e --id UB-Mannheim.TesseractOCR --silent --accept-source-agreements --accept-package-agreements
+    if errorlevel 1 (
+        echo.
+        echo   Could not install Tesseract automatically - that is OK.
+        echo   Everything works except the  --ocr  switch for scanned
+        echo   statements. To add it later, run:
+        echo       winget install -e --id UB-Mannheim.TesseractOCR
+        echo.
+    ) else (
+        echo Tesseract OCR installed.
+    )
+) else (
+    echo Found Tesseract OCR ^(scanned statements can be read^).
+)
+echo.
+
+REM --- 4. Add this folder to the user PATH -----------------------------------
 echo %PATH% | find /I "%SCRIPT_DIR%" >nul
 if errorlevel 1 (
     set "USERPATH="
@@ -107,5 +132,10 @@ echo     statements "C:\path\to\folder\of\pdfs"
 echo.
 echo That writes  Bank_Statements.xlsx  into the folder you run it from.
 echo (Add  -o "C:\somewhere\MyBook.xlsx"  to choose a different output file.)
+echo.
+echo If some statements are scans rather than downloads, add  --ocr  to read
+echo them too:
+echo.
+echo     statements "C:\path\to\folder" --ocr
 echo.
 pause
