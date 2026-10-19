@@ -116,32 +116,63 @@ def _run_tesseract(exe: str, image: Path) -> str:
     return proc.stdout.decode("utf-8", errors="replace")
 
 
-def ocr_pages(path: str | os.PathLike, dpi: int = DEFAULT_DPI) -> list[str] | None:
+def ocr_pages(
+    path: str | os.PathLike,
+    dpi: int = DEFAULT_DPI,
+    errors: list[str] | None = None,
+) -> list[str] | None:
     """Render every page of ``path`` and OCR it; None if OCR isn't possible.
 
     Never raises — OCR is a best-effort recovery path, so a missing engine,
     an unreadable PDF or a tesseract crash all just decline.
+
+    A page that fails to render or read costs only itself: it contributes
+    empty text and the rest of the document still comes back. Losing a
+    60-page statement to one bad page would be bad enough, but the real
+    damage was that it looked identical to "this file has no text" — the
+    caller got None either way and reported the text layer, never
+    mentioning that OCR had been tried and died. Pass ``errors`` to collect
+    what went wrong so it can be reported instead of guessed at.
     """
-    ok, _ = availability()
+    def note(message: str) -> None:
+        if errors is not None and message not in errors:
+            errors.append(message)
+
+    ok, reason = availability()
     if not ok:
+        note(reason)
         return None
     exe = find_tesseract()
     if exe is None:  # pragma: no cover - availability() already checked
         return None
     try:
         import fitz  # PyMuPDF
+    except ImportError as exc:  # pragma: no cover - availability() checked
+        note(f"PyMuPDF unavailable: {exc}")
+        return None
 
-        texts: list[str] = []
+    try:
+        doc = fitz.open(path)
+    except Exception as exc:  # noqa: BLE001
+        note(f"could not open the PDF to render it: {type(exc).__name__}: {exc}")
+        return None
+
+    texts: list[str] = []
+    try:
         with tempfile.TemporaryDirectory(prefix="stmt-ocr-") as tmp:
             tmpdir = Path(tmp)
-            with fitz.open(path) as doc:
-                for index in range(doc.page_count):
+            for index in range(doc.page_count):
+                try:
                     # Grayscale: statements are black text on white, and it
                     # cuts the render a third without hurting recognition.
                     pixmap = doc[index].get_pixmap(dpi=dpi, colorspace=fitz.csGRAY)
                     image = tmpdir / f"page{index + 1}.png"
                     pixmap.save(image)
                     texts.append(_run_tesseract(exe, image))
-        return texts
-    except Exception:  # noqa: BLE001 - the fallback must never abort a run
-        return None
+                except Exception as exc:  # noqa: BLE001 - one page, not the file
+                    texts.append("")
+                    note(f"page {index + 1} at {dpi} dpi: "
+                         f"{type(exc).__name__}: {str(exc)[:120]}")
+    finally:
+        doc.close()
+    return texts

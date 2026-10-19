@@ -250,7 +250,7 @@ class TestUnreadableTextLayer:
         import statement_parsers as sp
         from tests.test_ocr import _SCANNED_TEXT
 
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: _SCANNED_TEXT)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi, errors=None: _SCANNED_TEXT)
         r = sp.parse_pdf(all_fixtures_dir / "cid_garbage_text_layer.pdf", ocr=True)
         assert r.status == STATUS_OK, r.detail
         assert r.via_ocr is True

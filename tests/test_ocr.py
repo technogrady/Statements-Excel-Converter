@@ -104,14 +104,44 @@ class TestOcrPages:
         assert captured["cmd"][captured["cmd"].index("--psm") + 1] == "6"
         assert "preserve_interword_spaces=1" in captured["cmd"]
 
-    def test_engine_failure_declines_instead_of_raising(self, monkeypatch, fixture_dir):
+    def test_engine_failure_reports_instead_of_raising(self, monkeypatch, fixture_dir):
+        """A page the engine can't read costs only itself, and says why.
+
+        It used to abort the whole document and return None, which the
+        caller could not tell apart from "this file has no text" — so a
+        statement whose OCR died was reported as a text-layer problem and
+        the real cause never surfaced."""
         monkeypatch.setattr(ocr, "find_tesseract", lambda: "/usr/bin/tesseract")
 
         def boom(exe, image):
             raise subprocess.CalledProcessError(1, "tesseract")
 
         monkeypatch.setattr(ocr, "_run_tesseract", boom)
-        assert ocr.ocr_pages(fixture_dir / "wellsfargo_savings_2022-01.pdf") is None
+        errors: list[str] = []
+        pages = ocr.ocr_pages(
+            fixture_dir / "wellsfargo_savings_2022-01.pdf", errors=errors
+        )
+        assert pages == ["", ""]  # every page failed, none lost the document
+        assert errors and "CalledProcessError" in errors[0]
+        assert "page 1" in errors[0]
+
+    def test_one_bad_page_does_not_cost_the_others(self, monkeypatch, fixture_dir):
+        monkeypatch.setattr(ocr, "find_tesseract", lambda: "/usr/bin/tesseract")
+        seen = []
+
+        def flaky(exe, image):
+            seen.append(image)
+            if len(seen) == 1:
+                raise RuntimeError("render exploded")
+            return "page text"
+
+        monkeypatch.setattr(ocr, "_run_tesseract", flaky)
+        errors: list[str] = []
+        pages = ocr.ocr_pages(
+            fixture_dir / "wellsfargo_savings_2022-01.pdf", errors=errors
+        )
+        assert pages == ["", "page text"]
+        assert len(errors) == 1 and "page 1" in errors[0]
 
     def test_unopenable_pdf_declines(self, monkeypatch, tmp_path):
         monkeypatch.setattr(ocr, "find_tesseract", lambda: "/usr/bin/tesseract")
@@ -122,7 +152,7 @@ class TestOcrPages:
 
 class TestParsePdfOcrStage:
     def test_scan_is_no_text_without_the_flag(self, fixture_dir, monkeypatch):
-        def _boom(path, dpi):
+        def _boom(path, dpi, errors=None):
             raise AssertionError("OCR must not run unless asked for")
 
         monkeypatch.setattr(sp, "_ocr_pages", _boom)
@@ -132,7 +162,7 @@ class TestParsePdfOcrStage:
         assert "--ocr" in r.detail
 
     def test_scan_is_recovered_with_the_flag(self, fixture_dir, monkeypatch):
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: _SCANNED_TEXT)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi, errors=None: _SCANNED_TEXT)
         r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
         assert r.status == STATUS_OK
         assert r.via_ocr is True
@@ -142,7 +172,7 @@ class TestParsePdfOcrStage:
         assert len(stmt.transactions) == 2
 
     def test_ocr_statements_carry_a_spot_check_note(self, fixture_dir, monkeypatch):
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: _SCANNED_TEXT)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi, errors=None: _SCANNED_TEXT)
         r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
         assert r.statements[0].notes[0] == sp.OCR_NOTE
         assert "machine-read" in r.statements[0].notes[0]
@@ -150,13 +180,13 @@ class TestParsePdfOcrStage:
     def test_unavailable_engine_leaves_the_scan_reported_as_a_scan(
         self, fixture_dir, monkeypatch
     ):
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: None)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi, errors=None: None)
         r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
         assert r.status == STATUS_NO_TEXT
         assert r.via_ocr is False
 
     def test_ocr_never_overrides_a_reconciling_text_parse(self, fixture_dir, monkeypatch):
-        def _boom(path, dpi):
+        def _boom(path, dpi, errors=None):
             raise AssertionError("OCR must not run when the text layer parses")
 
         monkeypatch.setattr(sp, "_ocr_pages", _boom)
@@ -191,7 +221,7 @@ class TestParsePdfOcrStage:
         c.showPage()
         c.save()
 
-        def _boom(path, dpi):
+        def _boom(path, dpi, errors=None):
             raise AssertionError("OCR must not re-read a file that parsed")
 
         monkeypatch.setattr(sp, "_ocr_pages", _boom)
@@ -203,7 +233,7 @@ class TestParsePdfOcrStage:
         """A font with no character map makes every glyph extract as
         '(cid:12)'. That is the extractor reporting it could not read the
         page, not text — so --ocr has to run, exactly as for a blank page."""
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: _SCANNED_TEXT)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi, errors=None: _SCANNED_TEXT)
         r = sp.parse_pdf(all_fixtures_dir / "cid_garbage_text_layer.pdf", ocr=True)
         assert r.status == STATUS_OK, r.detail
         assert r.via_ocr is True
@@ -220,7 +250,7 @@ class TestParsePdfOcrStage:
             pdfplumber, "open", lambda *a, **k: _FakePDF([_SCANNED_TEXT[0], ""])
         )
         monkeypatch.setattr(sp, "_pymupdf_pages", lambda path: None)
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: _SCANNED_TEXT)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi, errors=None: _SCANNED_TEXT)
         r = sp.parse_pdf("half_scanned.pdf", ocr=True)
         assert r.via_ocr is True
         assert len(r.statements[0].transactions) == 2
@@ -341,7 +371,7 @@ class TestOcrFailuresExplainThemselves:
             _SCANNED_TEXT[0],
             _SCANNED_TEXT[1].replace("2,000.00 3,000.00", "9,000.00 3,000.00"),
         ]
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: misread)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi, errors=None: misread)
         r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
         assert r.status == STATUS_PARSE_ERROR
         assert "never reconcile" in r.detail
@@ -356,7 +386,7 @@ class TestOcrFailuresExplainThemselves:
                                      "Account number: |<"),
             _SCANNED_TEXT[1],
         ]
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: redacted)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi, errors=None: redacted)
         r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
         assert r.status == STATUS_PARSE_ERROR
         assert "OCR read this scan" in r.detail
@@ -364,7 +394,7 @@ class TestOcrFailuresExplainThemselves:
 
     def test_unknown_bank_in_ocr_text_says_so(self, fixture_dir, monkeypatch):
         monkeypatch.setattr(
-            sp, "_ocr_pages", lambda path, dpi: ["Example National Bank of Testing\n"]
+            sp, "_ocr_pages", lambda path, dpi, errors=None: ["Example National Bank of Testing\n"]
         )
         r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
         assert r.status == STATUS_PARSE_ERROR
@@ -387,7 +417,7 @@ class TestDpiLadder:
     def test_first_rung_that_reconciles_wins(self, fixture_dir, monkeypatch):
         seen = []
 
-        def _pages(path, dpi):
+        def _pages(path, dpi, errors=None):
             seen.append(dpi)
             return _SCANNED_TEXT if dpi == ocr.DPI_LADDER[1] else self._garbled()
 
@@ -401,7 +431,7 @@ class TestDpiLadder:
     def test_a_clean_scan_costs_only_the_first_rung(self, fixture_dir, monkeypatch):
         seen = []
 
-        def _pages(path, dpi):
+        def _pages(path, dpi, errors=None):
             seen.append(dpi)
             return _SCANNED_TEXT
 
@@ -413,7 +443,7 @@ class TestDpiLadder:
     def test_every_rung_is_tried_before_giving_up(self, fixture_dir, monkeypatch):
         seen = []
 
-        def _pages(path, dpi):
+        def _pages(path, dpi, errors=None):
             seen.append(dpi)
             return self._garbled()
 
@@ -427,7 +457,7 @@ class TestDpiLadder:
         """Two rungs parsed and neither balanced. The one that came closest
         points at a single misread digit, so it is what gets reported."""
 
-        def _pages(path, dpi):
+        def _pages(path, dpi, errors=None):
             off_by = "9,000.00" if dpi == ocr.DPI_LADDER[0] else "2,000.04"
             return [
                 _SCANNED_TEXT[0],
@@ -444,7 +474,7 @@ class TestDpiLadder:
         """One rung read too poorly to classify, another parsed and came up
         short. The second says where to look, so it is what gets reported."""
 
-        def _pages(path, dpi):
+        def _pages(path, dpi, errors=None):
             if dpi == ocr.DPI_LADDER[0]:
                 return ["blurred beyond recognition\n"]
             return self._garbled()
@@ -461,10 +491,46 @@ class TestOcrNeverDegradesADiagnosis:
     re-reading of the same pixels."""
 
     def test_unrecognized_text_pdf_keeps_its_verdict(self, fixture_dir, monkeypatch):
-        def _boom(path, dpi):
+        def _boom(path, dpi, errors=None):
             raise AssertionError("a file with a readable text layer must not be OCR'd")
 
         monkeypatch.setattr(sp, "_ocr_pages", _boom)
         r = sp.parse_pdf(fixture_dir / "unknown_bank.pdf", ocr=True)
         assert r.status == STATUS_UNRECOGNIZED
         assert "Example National Bank" in r.detail
+
+
+class TestOcrThatReadsNothingSaysSo:
+    """OCR running and coming back empty is a *second*, separate failure
+    from an unreadable text layer. Reporting only the text layer pointed at
+    the wrong thing: the text layer is why OCR was reached at all."""
+
+    def test_blank_render_is_reported_not_swallowed(
+        self, all_fixtures_dir, monkeypatch
+    ):
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi, errors=None: ["", ""])
+        r = sp.parse_pdf(all_fixtures_dir / "cid_garbage_text_layer.pdf", ocr=True)
+        assert r.status == STATUS_PARSE_ERROR
+        assert "OCR was tried" in r.detail
+        assert "read nothing" in r.detail
+        assert "blank" in r.detail
+
+    def test_a_per_page_error_is_named(self, all_fixtures_dir, monkeypatch):
+        def failing(path, dpi, errors=None):
+            if errors is not None:
+                errors.append(f"page 3 at {dpi} dpi: RuntimeError: render exploded")
+            return ["", "", ""]
+
+        monkeypatch.setattr(sp, "_ocr_pages", failing)
+        r = sp.parse_pdf(all_fixtures_dir / "cid_garbage_text_layer.pdf", ocr=True)
+        assert r.status == STATUS_PARSE_ERROR
+        assert "page 3" in r.detail and "render exploded" in r.detail
+
+    def test_an_engine_that_cannot_run_is_still_just_no_text(
+        self, all_fixtures_dir, monkeypatch
+    ):
+        # Nothing was attempted, so there is nothing extra to report and the
+        # text-layer verdict stands.
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi, errors=None: None)
+        r = sp.parse_pdf(all_fixtures_dir / "cid_garbage_text_layer.pdf", ocr=True)
+        assert r.status == STATUS_NO_TEXT

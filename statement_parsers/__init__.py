@@ -124,9 +124,10 @@ def ocr_availability() -> tuple[bool, str]:
     return _ocr.availability()
 
 
-def _ocr_pages(path: str | os.PathLike, dpi: int) -> list[str] | None:
+def _ocr_pages(path: str | os.PathLike, dpi: int,
+               errors: list[str] | None = None) -> list[str] | None:
     """Rendered-and-machine-read page text, or None when OCR isn't possible."""
-    return _ocr.ocr_pages(path, dpi=dpi)
+    return _ocr.ocr_pages(path, dpi=dpi, errors=errors)
 
 
 def _pymupdf_pages(path: str | os.PathLike) -> list[str] | None:
@@ -356,9 +357,12 @@ def _ocr_attempt(path: str | os.PathLike, filename: str) -> FileResult | None:
     resolution failed, the most informative of their verdicts is reported.
     """
     best: FileResult | None = None
+    errors: list[str] = []
+    read_nothing = False
     for dpi in _ocr.DPI_LADDER:
-        pages = _ocr_pages(path, dpi)
+        pages = _ocr_pages(path, dpi, errors)
         if not _has_readable_text(pages):
+            read_nothing = read_nothing or pages is not None
             continue
         ocr_result, _ = _run_pipeline(pages, filename)
         if _fully_reconciled(ocr_result):
@@ -370,7 +374,20 @@ def _ocr_attempt(path: str | os.PathLike, filename: str) -> FileResult | None:
             best = ocr_result
 
     if best is None:
-        return None
+        if not (errors or read_nothing):
+            return None
+        # OCR ran and came back with nothing to parse. Saying only "the text
+        # layer is unreadable" would point at the wrong thing entirely: the
+        # text layer is why we are here, and this is a second, separate
+        # failure that the run was hiding.
+        why = f" ({'; '.join(errors[:3])})" if errors else (
+            " (the rendered pages came back blank)"
+        )
+        return FileResult(
+            filename, STATUS_PARSE_ERROR,
+            detail=(f"OCR was tried at {len(_ocr.DPI_LADDER)} render "
+                    f"resolutions and read nothing{why}"),
+        )
 
     tried = f"at {len(_ocr.DPI_LADDER)} render resolutions"
     if best.status == STATUS_OK:
