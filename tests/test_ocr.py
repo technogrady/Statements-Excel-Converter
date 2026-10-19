@@ -199,6 +199,16 @@ class TestParsePdfOcrStage:
         assert r.status == STATUS_OK
         assert not r.statements[0].reconciled
 
+    def test_unreadable_cid_text_layer_is_re_read(self, all_fixtures_dir, monkeypatch):
+        """A font with no character map makes every glyph extract as
+        '(cid:12)'. That is the extractor reporting it could not read the
+        page, not text — so --ocr has to run, exactly as for a blank page."""
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: _SCANNED_TEXT)
+        r = sp.parse_pdf(all_fixtures_dir / "cid_garbage_text_layer.pdf", ocr=True)
+        assert r.status == STATUS_OK, r.detail
+        assert r.via_ocr is True
+        assert r.statements[0].reconciled
+
     def test_part_rescanned_file_is_re_read(self, monkeypatch):
         """A file where one page lost its text layer parses 'successfully' while
         silently missing that page's transactions — so it does get OCR'd."""

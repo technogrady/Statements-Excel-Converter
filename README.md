@@ -74,10 +74,11 @@ To update the tool later, `cd` back into the folder and run `git pull`.
 
 ```bash
 pip install -r requirements.txt
-python parse_statements.py <input_folder> [-o output.xlsx] [--ocr]
+python parse_statements.py <input> [-o output.xlsx] [--ocr]
 ```
 
-The folder is searched recursively for `*.pdf` (case-insensitive). One
+`<input>` is a folder — searched recursively for `*.pdf`
+(case-insensitive) — or a single PDF. One
 bad PDF never aborts the run — encrypted, unrecognized, scanned-image,
 or unparsable files become flagged Inventory rows, and a run summary is
 printed to stdout.
@@ -182,6 +183,37 @@ read as a comma or colon, and a date that picked up a stray digit
 the statement period). Every repaired date is named in a note so you can
 check it; an undecidable one is reported, never quietly moved.
 
+## When a statement won't parse (`--dump-text`)
+
+A file that comes back `UNRECOGNIZED`, `NO_TEXT` or `PARSE_ERROR` can
+only be diagnosed from the text the extractor actually produced — and
+that text is somebody's bank statement. `--dump-text` prints it with the
+identifying parts removed, so it can be handed to whoever is fixing the
+parser without handing over the statement:
+
+```bash
+python parse_statements.py "path/to/Statements 2024.pdf" --dump-text --pages 2
+```
+
+It writes no workbook. For each extractor in turn — pdfplumber, PyMuPDF,
+and OCR if nothing readable came back and `--ocr` is given — it prints
+what that extractor saw, so "which stage lost it" is answerable at a
+glance. `--pages N` stops after the first N pages of each file; two is
+usually enough to show a layout.
+
+**Removed:** the holder's name and mailing address, and every account,
+routing or reference number (digits become `#` of the same length, and
+the four real digits inside a bank-printed `XXXXXXX5255` go too).
+
+**Kept:** section headers, column rules, dates, amounts, merchant names
+and the addresses inside transaction descriptions. Those are a shop's
+address, not the holder's, and a wrapped description is exactly what the
+parser gets wrong. So a dump still shows what was spent and where — it
+is safe to send to someone fixing the parser, not safe to publish. The
+redaction works by shape, so read a dump before passing it on; see
+`statement_parsers/redact.py` for what it recognizes and what it admits
+it can miss.
+
 ## Scanned statements (`--ocr`)
 
 Statements that were printed and scanned back in carry no text layer, so
@@ -262,6 +294,7 @@ statement_parsers/
     wellsfargo.py          # Wells Fargo parser
     capitalcity.py         # Capital City Bank parser
     ocr.py                 # optional OCR fallback for scans (--ocr)
+    redact.py              # strip identity from extracted text (--dump-text)
 consolidation.py           # dedup, account grouping, balance chaining,
                            # label variance, missing-month detection
 excel_writer.py            # workbook generation (xlsxwriter)
@@ -297,6 +330,11 @@ survive (wrapped description fragments, trailing-minus amounts,
 sections breaking mid-transaction across pages, three-triplet CHECKS
 rows, check-image caption pages, interleaved summary columns, two
 statements back to back in one file, a redacted mailing address).
+A text layer is not always readable text: when an embedded font carries
+no character map, every glyph extracts as `(cid:12)` and the page says
+nothing. Those files are reported as unreadable rather than
+unrecognized, and `--ocr` treats them as the scans they effectively are.
+
 `tests/fixtures/extracted_text/` holds the raw `page.extract_text()`
 dumps the parsing regexes were calibrated against — per the project
 rule: build parsing against actual extracted text, not the visual PDF.

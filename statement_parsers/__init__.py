@@ -8,6 +8,7 @@ changes.
 from __future__ import annotations
 
 import os
+import re
 
 from . import ocr as _ocr
 from . import capitalcity, regions, servisfirst, wellsfargo
@@ -27,8 +28,10 @@ __all__ = [
     "PARSERS",
     "OCR_NOTE",
     "detect_bank",
+    "extract_pages",
     "ocr_availability",
     "parse_pdf",
+    "readable_text",
     "FileResult",
     "ParsedStatement",
     "Transaction",
@@ -40,6 +43,28 @@ __all__ = [
 # an unambiguous wordmark are matched ahead of both, and Capital City (whose
 # layout fallback is specific to its own section names) ahead of ServisFirst.
 PARSERS = [regions, wellsfargo, capitalcity, servisfirst]
+
+
+# A PDF whose embedded font carries no ToUnicode map extracts as a run of
+# '(cid:12)' placeholders: pdfminer saying it could not tell what the glyph
+# was. That is not text. A page of it has nothing to route, nothing to parse
+# and nothing to report beyond the placeholders themselves, so it has to count
+# as no text everywhere the pipeline asks the question — above all at the
+# --ocr gate, which exists for exactly this file and was letting it through.
+_CID_RE = re.compile(r"\(cid:\d+\)")
+
+
+def readable_text(page: str) -> str:
+    """``page`` with unmapped-glyph placeholders removed, stripped.
+
+    Empty means the extractor produced nothing a parser could read, whether
+    the page was blank or every character came back unmapped.
+    """
+    return _CID_RE.sub("", page or "").strip()
+
+
+def _has_readable_text(pages: list[str] | None) -> bool:
+    return bool(pages) and any(readable_text(p) for p in pages)
 
 
 def detect_bank(text: str):
@@ -117,10 +142,18 @@ def _parse_with(parser, pages: list[str], filename: str) -> FileResult:
 def _run_pipeline(pages: list[str], filename: str) -> tuple[FileResult, object | None]:
     """Classify + route + parse one page list. Returns (result, parser) so the
     caller can reuse a successfully-detected parser for a fallback re-extract."""
-    if not any(p.strip() for p in pages):
-        return (FileResult(filename, STATUS_NO_TEXT,
-                           detail="no extractable text (possible scan) — "
-                                  "retry with --ocr to machine-read it"), None)
+    if not _has_readable_text(pages):
+        detail = ("no extractable text (possible scan) — "
+                  "retry with --ocr to machine-read it")
+        if any(p.strip() for p in pages):
+            # There *is* a text layer; every character in it came back
+            # unmapped. Saying "no text" would send someone looking for a
+            # scan that isn't there.
+            detail = ("the text layer has no readable characters — its font "
+                      "carries no character map, so every glyph extracts as "
+                      "'(cid:N)'. Retry with --ocr to machine-read the page "
+                      "images instead")
+        return FileResult(filename, STATUS_NO_TEXT, detail=detail), None
 
     parser = detect_bank(pages[0]) or detect_bank("\n".join(pages))
     if parser is None:
@@ -187,7 +220,7 @@ def parse_pdf(path: str | os.PathLike, ocr: bool = False) -> FileResult:
     # reconcile. Retry with PyMuPDF; pdfplumber may already have routed the
     # file (e.g. via a footer signature), so reuse that parser when available.
     fitz_pages = _pymupdf_pages(path)
-    if fitz_pages is not None and any(p.strip() for p in fitz_pages):
+    if _has_readable_text(fitz_pages):
         parser = detected or detect_bank(fitz_pages[0]) or detect_bank(
             "\n".join(fitz_pages)
         )
@@ -204,7 +237,7 @@ def parse_pdf(path: str | os.PathLike, ocr: bool = False) -> FileResult:
 
     if ocr:
         sources = [src for src in (pages, fitz_pages) if src]
-        has_text = any(any(page.strip() for page in src) for src in sources)
+        has_text = any(_has_readable_text(src) for src in sources)
         if not has_text or any(_has_blank_page(src) for src in sources):
             ocr_result = _ocr_attempt(path, filename)
             # A failed OCR attempt replaces the original verdict only when the
@@ -217,10 +250,48 @@ def parse_pdf(path: str | os.PathLike, ocr: bool = False) -> FileResult:
     return result
 
 
+def extract_pages(
+    path: str | os.PathLike, ocr: bool = False
+) -> list[tuple[str, list[str]]]:
+    """Every extractor's view of one PDF, for diagnosis (see --dump-text).
+
+    Returns ``[(extractor name, pages), ...]`` in the order ``parse_pdf``
+    would reach for them, so a dump shows what the parser was actually
+    working from — including an extractor that returned nothing, which is
+    itself the finding when a file won't route.
+
+    OCR is run only when neither text extractor produced readable text, the
+    same gate ``parse_pdf`` uses, and only at the first rung of the ladder:
+    a dump is for reading the layout, not for making the figures add up.
+
+    Never raises; an extractor that fails contributes an empty page list.
+    """
+    views: list[tuple[str, list[str]]] = []
+    try:
+        import pdfplumber
+
+        with pdfplumber.open(path) as pdf:
+            views.append(("pdfplumber", [page.extract_text() or "" for page in pdf.pages]))
+    except Exception as exc:  # noqa: BLE001 - a dump must never abort
+        views.append((f"pdfplumber (failed: {type(exc).__name__})", []))
+
+    fitz_pages = _pymupdf_pages(path)
+    if fitz_pages is not None:
+        views.append(("pymupdf", fitz_pages))
+
+    if ocr and not any(_has_readable_text(pages) for _, pages in views):
+        ocr_pages = _ocr_pages(path, _ocr.DEFAULT_DPI)
+        if ocr_pages is not None:
+            views.append((f"ocr {_ocr.DEFAULT_DPI}dpi", ocr_pages))
+
+    return views
+
+
 def _has_blank_page(pages: list[str]) -> bool:
     """A page with no text alongside a page that has some — i.e. part of the
     file was rescanned, so a text-layer parse is silently missing whole pages."""
-    return any(not p.strip() for p in pages) and any(p.strip() for p in pages)
+    return (any(not readable_text(p) for p in pages)
+            and any(readable_text(p) for p in pages))
 
 
 # How informative a failed OCR attempt is, for picking which one to report.
@@ -265,7 +336,7 @@ def _ocr_attempt(path: str | os.PathLike, filename: str) -> FileResult | None:
     best: FileResult | None = None
     for dpi in _ocr.DPI_LADDER:
         pages = _ocr_pages(path, dpi)
-        if pages is None or not any(p.strip() for p in pages):
+        if not _has_readable_text(pages):
             continue
         ocr_result, _ = _run_pipeline(pages, filename)
         if _fully_reconciled(ocr_result):

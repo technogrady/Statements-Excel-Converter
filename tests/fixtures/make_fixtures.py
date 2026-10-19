@@ -796,6 +796,22 @@ def make_unrecognized_bank(path: Path) -> None:
     )
 
 
+def make_cid_garbage(path: Path) -> None:
+    """A PDF with a text layer that decodes to nothing.
+
+    When an embedded font carries no ToUnicode map, pdfminer cannot tell what
+    any glyph was and emits '(cid:N)' placeholders instead of characters —
+    the page extracts as a wall of them. The file is not a scan (it has text)
+    and it is not an unrecognized bank (there is nothing to recognize); it is
+    a statement whose text layer is unreadable, and only OCR can get at it.
+    Writing the placeholders as literal text reproduces exactly what the
+    pipeline is handed.
+    """
+    lines = ["".join(f"(cid:{n})" for n in range(start, start + 12))
+             for start in (0, 12, 24, 36, 48)]
+    _write_pages(path, [lines])
+
+
 def make_no_text(path: Path) -> None:
     """A PDF with no extractable text (simulates a scanned statement)."""
     c = canvas.Canvas(str(path), pagesize=letter)
@@ -826,6 +842,7 @@ ALL_FIXTURES = {
     "regions_personal_2022-02.pdf": make_regions_personal,
     "unknown_bank.pdf": make_unrecognized_bank,
     "scanned_image_only.pdf": make_no_text,
+    "cid_garbage_text_layer.pdf": make_cid_garbage,
     "password_protected.pdf": make_encrypted,
 }
 

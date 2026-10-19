@@ -1,3 +1,5 @@
+import re
+
 from statement_parsers import (
     capitalcity,
     detect_bank,
@@ -199,3 +201,34 @@ MEMBER FDIC
         r = sp.parse_pdf("clean.pdf")
         assert r.status == STATUS_OK
         assert r.statements[0].reconciled is True
+
+
+class TestUnreadableTextLayer:
+    """A PDF whose embedded font carries no ToUnicode map extracts as a wall
+    of '(cid:12)' placeholders. Before this was recognized the file was
+    reported UNRECOGNIZED — with the placeholders quoted back as the hint —
+    and, worse, --ocr skipped it, because something non-blank came out of the
+    extractor and the gate counted that as text."""
+
+    def test_readable_text_drops_cid_placeholders(self):
+        from statement_parsers import readable_text
+
+        assert readable_text("(cid:0)(cid:1)(cid:2)") == ""
+        assert readable_text("  (cid:3)  ") == ""
+        assert readable_text("") == ""
+
+    def test_readable_text_keeps_a_page_that_only_lost_a_glyph(self):
+        from statement_parsers import readable_text
+
+        assert readable_text("Ending Balance (cid:9) 13,400.00") == (
+            "Ending Balance  13,400.00"
+        )
+
+    def test_reported_as_unreadable_not_unrecognized(self, all_fixtures_dir):
+        r = parse_pdf(all_fixtures_dir / "cid_garbage_text_layer.pdf")
+        assert r.status == STATUS_NO_TEXT
+        assert "no readable characters" in r.detail
+        assert "--ocr" in r.detail
+        # the placeholders themselves are not quoted back as a bank hint
+        # (the message names the shape; it never echoes the page)
+        assert not re.search(r"\(cid:\d", r.detail)
