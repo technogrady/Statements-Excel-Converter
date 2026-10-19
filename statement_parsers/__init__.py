@@ -30,6 +30,7 @@ __all__ = [
     "detect_bank",
     "extract_pages",
     "ocr_availability",
+    "page_is_readable",
     "parse_pdf",
     "readable_text",
     "FileResult",
@@ -63,8 +64,29 @@ def readable_text(page: str) -> str:
     return _CID_RE.sub("", page or "").strip()
 
 
+def page_is_readable(page: str) -> bool:
+    """Does this page carry enough text for a parser to work from?
+
+    Asking whether *any* character survived is not enough, and that is the
+    trap: a font with no character map still lets the odd glyph through — a
+    page number, a stray '2024' — so a wall of placeholders with four
+    readable characters in it answers "yes" to that question and the --ocr
+    gate stays shut on exactly the file that needs it.
+
+    So the two are weighed against each other. Each '(cid:N)' stands for one
+    character the extractor could not identify; a page is readable when the
+    characters that did map outnumber those that didn't. A statement that
+    lost a glyph or two still reads, and one whose font never decoded does
+    not, whatever debris came through with it.
+    """
+    text = page or ""
+    unmapped = len(_CID_RE.findall(text))
+    mapped = len(re.sub(r"\s", "", _CID_RE.sub("", text)))
+    return mapped > unmapped if unmapped else bool(mapped)
+
+
 def _has_readable_text(pages: list[str] | None) -> bool:
-    return bool(pages) and any(readable_text(p) for p in pages)
+    return bool(pages) and any(page_is_readable(p) for p in pages)
 
 
 def detect_bank(text: str):
@@ -290,8 +312,8 @@ def extract_pages(
 def _has_blank_page(pages: list[str]) -> bool:
     """A page with no text alongside a page that has some — i.e. part of the
     file was rescanned, so a text-layer parse is silently missing whole pages."""
-    return (any(not readable_text(p) for p in pages)
-            and any(readable_text(p) for p in pages))
+    return (any(not page_is_readable(p) for p in pages)
+            and any(page_is_readable(p) for p in pages))
 
 
 # How informative a failed OCR attempt is, for picking which one to report.

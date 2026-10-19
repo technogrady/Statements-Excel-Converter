@@ -843,6 +843,11 @@ def make_cid_garbage(path: Path) -> None:
     """
     lines = ["".join(f"(cid:{n})" for n in range(start, start + 12))
              for start in (0, 12, 24, 36, 48)]
+    # ...with a couple of glyphs that *did* map, which is what real ones look
+    # like: a page number or a year survives. Counting those as "has text"
+    # was what kept --ocr from running on the whole file.
+    lines[0] += " 2024"
+    lines[-1] += " Page 1"
     _write_pages(path, [lines])
 
 

@@ -232,3 +232,25 @@ class TestUnreadableTextLayer:
         # the placeholders themselves are not quoted back as a bank hint
         # (the message names the shape; it never echoes the page)
         assert not re.search(r"\(cid:\d", r.detail)
+
+    def test_a_few_stray_mapped_glyphs_do_not_count_as_text(self):
+        """The trap this fell into once: a broken font still lets the odd
+        glyph through, so 'is there any readable character?' answers yes on
+        a page with nothing on it, and the --ocr gate stays shut."""
+        from statement_parsers import page_is_readable
+
+        assert not page_is_readable("(cid:1)" * 800 + " 2024 Page 1")
+        assert page_is_readable("Ending Balance (cid:9) 13,400.00")
+        assert page_is_readable("Previous Balance 10,282.45")
+        assert not page_is_readable("")
+
+    def test_ocr_runs_on_a_page_that_is_mostly_placeholders(
+        self, all_fixtures_dir, monkeypatch
+    ):
+        import statement_parsers as sp
+        from tests.test_ocr import _SCANNED_TEXT
+
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: _SCANNED_TEXT)
+        r = sp.parse_pdf(all_fixtures_dir / "cid_garbage_text_layer.pdf", ocr=True)
+        assert r.status == STATUS_OK, r.detail
+        assert r.via_ocr is True
