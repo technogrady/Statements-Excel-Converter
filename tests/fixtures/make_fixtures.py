@@ -633,6 +633,155 @@ def make_wellsfargo_checking(path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Capital City Bank fixture (synthetic)
+# ---------------------------------------------------------------------------
+
+# What OCR makes of the black box a redaction leaves over the mailing address.
+# On the first statement the box covers both address lines, so the header
+# line's left half is noise and the city/ST/ZIP line is gone entirely — the
+# header-stripping must survive that.
+_CC_REDACTED = "=eee eee ei eeeeeee!"
+
+
+def _cc_header(statement_date: str, page_no: int, address: list[str]) -> list[str]:
+    """The block that reprints at the top of every Capital City page."""
+    return [
+        "10000000000 002 30",
+        f"EXAMPLE CONTRACTING LLC Date {statement_date} Page {page_no}",
+        f"{address[0]} Primary Account XXXXXXX9012",
+        *address[1:],
+        "",
+    ]
+
+
+_CC_PROMO = [
+    "Enroll in Making Cents & boost your savings when you use your personal",
+    "Capital City Bank Visa debit card to shop! Sign up today or learn more at",
+    "ccbg.com/makingcents. Terms and conditions apply.",
+    "",
+]
+_CC_ADDRESS = ["12 EXAMPLE LN", "ANYTOWN FL 00000-0000"]
+
+
+def make_capitalcity(path: Path) -> None:
+    """Capital City sample: TWO statements in one PDF (synthetic).
+
+    Capital City customers receive a year of statements as a single file,
+    so the fixture carries two periods back to back, the second spanning
+    Dec→Jan so transaction years have to be inferred.
+
+    Statement A, 2021-11-16 → 2021-12-14: opens 10,000.00, 2 credits
+    totaling 5,500.00, 3 other debits and 3 checks totaling 2,100.00 over
+    6 Checks/Debits, closes 13,400.00. Its mailing address is redacted.
+
+    Statement B, 2021-12-15 → 2022-01-14: opens 13,400.00, 1 credit of
+    2,000.00, 2 other debits and 1 check totaling 1,000.00 over 3
+    Checks/Debits, closes 14,400.00. Its last debit's description breaks
+    across the page boundary.
+    """
+    redacted = [_CC_REDACTED]
+    page1 = [
+        *_cc_header("12/14/21", 1, redacted)[:1],
+        *_CC_PROMO,
+        *_cc_header("12/14/21", 1, redacted)[1:],
+        "CHECKING ACCOUNT",
+        "",
+        "EVERYDAY CHECKING FOR BUSINESS Images 12",
+        "Account Number XXXXXXX9012 Statement Dates 11/16/21 thru 12/14/21",
+        "Previous Balance 10,000.00 Days in this Statement Period 29",
+        "2 Deposits/Credits 5,500.00 Avg Ledger Balance 14,000.00",
+        "6 Checks/Debits 2,100.00 Avg Collected Balance 14,000.00",
+        "Service Charges .00",
+        "Interest Paid .00",
+        "Ending Balance 13,400.00",
+        "",
+        "DEPOSITS AND OTHER CREDITS",
+        "Date Description Amount",
+        "11/20 Deposit 5,000.00",
+        "12/01 CREDIT 1234 11/30/21 00000000 500.00",
+        "EXAMPLE SUPPLY CO",
+        "ANYTOWNFL",
+        "",
+        "OTHER DEBITS",
+        "Date Description Amount",
+        "11/22 POS DEB 0001 11/21/21 00000000 100.00-",
+        "SAMPLE MERCHANT",
+        "100 EXAMPLE ST",
+        "12/02 DBT CRD 0002 12/01/21 00000000 200.00-",
+        "GENERIC STORE 00000",
+        "ANYTOWNFL",
+    ]
+    page2 = [
+        *_cc_header("12/14/21", 2, redacted),
+        "EVERYDAY CHECKING FOR BUSINESS XXXXXXX9012 (Continued)",
+        "",
+        "OTHER DEBITS",
+        "Date Description Amount",
+        "12/10 EXAMPLE UTILITY CO WEB PAY CCD 300.00-",
+        "",
+        "CHECKS IN NUMBER ORDER",
+        "Date Check No Amount Date Check No Amount",
+        "11/30 5001 400.00 12/08 5004* 600.00",
+        "12/03 5002 500.00",
+        "* Denotes missing check numbers",
+        "",
+        "DAILY BALANCE INFORMATION",
+        "Date Balance Date Balance Date Balance",
+        "11/16 10,000.00 11/30 14,500.00 12/03 14,300.00",
+        "11/20 15,000.00 12/01 15,000.00 12/08 13,700.00",
+        "11/22 14,900.00 12/02 14,800.00 12/10 13,400.00",
+        "",
+        "------------END OF STATEMENT----------",
+    ]
+    page3 = [
+        *_cc_header("1/14/22", 1, _CC_ADDRESS)[:1],
+        *_CC_PROMO,
+        *_cc_header("1/14/22", 1, _CC_ADDRESS)[1:],
+        "CHECKING ACCOUNT",
+        "",
+        "EVERYDAY CHECKING FOR BUSINESS Images 4",
+        "Account Number XXXXXXX9012 Statement Dates 12/15/21 thru 1/14/22",
+        "Previous Balance 13,400.00 Days in this Statement Period 31",
+        "1 Deposits/Credits 2,000.00 Avg Ledger Balance 15,000.00",
+        "3 Checks/Debits 1,000.00 Avg Collected Balance 15,000.00",
+        "Service Charges .00",
+        "Interest Paid .00",
+        "Ending Balance 14,400.00",
+        "",
+        "DEPOSITS AND OTHER CREDITS",
+        "Date Description Amount",
+        "12/20 Deposit 2,000.00",
+        "",
+        "OTHER DEBITS",
+        "Date Description Amount",
+        "12/28 DBT CRD 0003 12/27/21 00000000 50.00-",
+        "EXAMPLE HARDWARE",  # description continues on the next page
+    ]
+    page4 = [
+        *_cc_header("1/14/22", 2, _CC_ADDRESS),
+        "EVERYDAY CHECKING FOR BUSINESS XXXXXXX9012 (Continued)",
+        "",
+        "OTHER DEBITS",
+        "Date Description Amount",
+        "ANYTOWNFL",  # ...and resumes here, under the reprinted header
+        "1/05 EXAMPLE INSURANCE PREM CCD 150.00-",
+        "",
+        "CHECKS IN NUMBER ORDER",
+        "Date Check No Amount Date Check No Amount",
+        "1/10 5005 800.00",
+        "* Denotes missing check numbers",
+        "",
+        "DAILY BALANCE INFORMATION",
+        "Date Balance Date Balance Date Balance",
+        "12/15 13,400.00 12/28 15,350.00 1/10 14,400.00",
+        "12/20 15,400.00 1/05 15,200.00",
+        "",
+        "------------END OF STATEMENT----------",
+    ]
+    _write_pages(path, [page1, page2, page3, page4])
+
+
+# ---------------------------------------------------------------------------
 # Negative-path fixtures
 # ---------------------------------------------------------------------------
 
@@ -645,6 +794,22 @@ def make_unrecognized_bank(path: Path) -> None:
             "Account 00000 Period 01/01/2022 - 01/31/2022",
         ]],
     )
+
+
+def make_cid_garbage(path: Path) -> None:
+    """A PDF with a text layer that decodes to nothing.
+
+    When an embedded font carries no ToUnicode map, pdfminer cannot tell what
+    any glyph was and emits '(cid:N)' placeholders instead of characters —
+    the page extracts as a wall of them. The file is not a scan (it has text)
+    and it is not an unrecognized bank (there is nothing to recognize); it is
+    a statement whose text layer is unreadable, and only OCR can get at it.
+    Writing the placeholders as literal text reproduces exactly what the
+    pipeline is handed.
+    """
+    lines = ["".join(f"(cid:{n})" for n in range(start, start + 12))
+             for start in (0, 12, 24, 36, 48)]
+    _write_pages(path, [lines])
 
 
 def make_no_text(path: Path) -> None:
@@ -672,10 +837,12 @@ ALL_FIXTURES = {
     "servisfirst_overdrawn.pdf": make_servisfirst_overdrawn,
     "wellsfargo_savings_2022-01.pdf": make_wellsfargo_savings,
     "wellsfargo_checking_2022-02.pdf": make_wellsfargo_checking,
+    "capitalcity_checking_2021-12.pdf": make_capitalcity,
     "regions_checking_2022-01_redownload.pdf": make_regions_dec,
     "regions_personal_2022-02.pdf": make_regions_personal,
     "unknown_bank.pdf": make_unrecognized_bank,
     "scanned_image_only.pdf": make_no_text,
+    "cid_garbage_text_layer.pdf": make_cid_garbage,
     "password_protected.pdf": make_encrypted,
 }
 
@@ -688,6 +855,7 @@ END_TO_END_FIXTURES = [
     "servisfirst_checking_2022-09.pdf",
     "wellsfargo_savings_2022-01.pdf",
     "wellsfargo_checking_2022-02.pdf",
+    "capitalcity_checking_2021-12.pdf",
     "regions_checking_2022-01_redownload.pdf",
     "unknown_bank.pdf",
     "scanned_image_only.pdf",

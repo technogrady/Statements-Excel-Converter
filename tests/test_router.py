@@ -1,4 +1,12 @@
-from statement_parsers import detect_bank, parse_pdf, regions, servisfirst
+import re
+
+from statement_parsers import (
+    capitalcity,
+    detect_bank,
+    parse_pdf,
+    regions,
+    servisfirst,
+)
 from statement_parsers.base import (
     STATUS_ENCRYPTED,
     STATUS_NO_TEXT,
@@ -25,6 +33,28 @@ class TestDetection:
         # "ServisFirst" text); the reverse-side disclosure footer recovers them.
         text = (
             "P.O. Box 1508 Birmingham, AL 35201 MEMBER FDIC "
+            "NOTICE: SEE REVERSE SIDE FOR IMPORTANT INFORMATION"
+        )
+        assert detect_bank(text) is servisfirst
+
+    def test_capitalcity_by_marketing_blurb(self):
+        # Capital City prints no wordmark in text; the promo names the bank.
+        assert detect_bank("learn more at ccbg.com/makingcents") is capitalcity
+
+    def test_capitalcity_by_layout_when_nothing_names_the_bank(self):
+        text = (
+            "Primary Account XXXXXXX9012\n"
+            "Previous Balance 10,000.00 Days in this Statement Period 29\n"
+            "Ending Balance 13,400.00"
+        )
+        assert detect_bank(text) is capitalcity
+
+    def test_servisfirst_layout_is_not_taken_by_capitalcity(self):
+        # Both are the same core-banking print, and Capital City is matched
+        # first — its fallback must not fire on a ServisFirst statement.
+        text = (
+            "Primary Acct. XXXXXXXXXXXX5678\n"
+            "Previous Balance 20,000.00\nCurrent Balance 26,550.00\n"
             "NOTICE: SEE REVERSE SIDE FOR IMPORTANT INFORMATION"
         )
         assert detect_bank(text) is servisfirst
@@ -171,3 +201,34 @@ MEMBER FDIC
         r = sp.parse_pdf("clean.pdf")
         assert r.status == STATUS_OK
         assert r.statements[0].reconciled is True
+
+
+class TestUnreadableTextLayer:
+    """A PDF whose embedded font carries no ToUnicode map extracts as a wall
+    of '(cid:12)' placeholders. Before this was recognized the file was
+    reported UNRECOGNIZED — with the placeholders quoted back as the hint —
+    and, worse, --ocr skipped it, because something non-blank came out of the
+    extractor and the gate counted that as text."""
+
+    def test_readable_text_drops_cid_placeholders(self):
+        from statement_parsers import readable_text
+
+        assert readable_text("(cid:0)(cid:1)(cid:2)") == ""
+        assert readable_text("  (cid:3)  ") == ""
+        assert readable_text("") == ""
+
+    def test_readable_text_keeps_a_page_that_only_lost_a_glyph(self):
+        from statement_parsers import readable_text
+
+        assert readable_text("Ending Balance (cid:9) 13,400.00") == (
+            "Ending Balance  13,400.00"
+        )
+
+    def test_reported_as_unreadable_not_unrecognized(self, all_fixtures_dir):
+        r = parse_pdf(all_fixtures_dir / "cid_garbage_text_layer.pdf")
+        assert r.status == STATUS_NO_TEXT
+        assert "no readable characters" in r.detail
+        assert "--ocr" in r.detail
+        # the placeholders themselves are not quoted back as a bank hint
+        # (the message names the shape; it never echoes the page)
+        assert not re.search(r"\(cid:\d", r.detail)

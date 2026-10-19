@@ -122,7 +122,7 @@ class TestOcrPages:
 
 class TestParsePdfOcrStage:
     def test_scan_is_no_text_without_the_flag(self, fixture_dir, monkeypatch):
-        def _boom(path):
+        def _boom(path, dpi):
             raise AssertionError("OCR must not run unless asked for")
 
         monkeypatch.setattr(sp, "_ocr_pages", _boom)
@@ -132,7 +132,7 @@ class TestParsePdfOcrStage:
         assert "--ocr" in r.detail
 
     def test_scan_is_recovered_with_the_flag(self, fixture_dir, monkeypatch):
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path: _SCANNED_TEXT)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: _SCANNED_TEXT)
         r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
         assert r.status == STATUS_OK
         assert r.via_ocr is True
@@ -142,7 +142,7 @@ class TestParsePdfOcrStage:
         assert len(stmt.transactions) == 2
 
     def test_ocr_statements_carry_a_spot_check_note(self, fixture_dir, monkeypatch):
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path: _SCANNED_TEXT)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: _SCANNED_TEXT)
         r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
         assert r.statements[0].notes[0] == sp.OCR_NOTE
         assert "machine-read" in r.statements[0].notes[0]
@@ -150,13 +150,13 @@ class TestParsePdfOcrStage:
     def test_unavailable_engine_leaves_the_scan_reported_as_a_scan(
         self, fixture_dir, monkeypatch
     ):
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path: None)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: None)
         r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
         assert r.status == STATUS_NO_TEXT
         assert r.via_ocr is False
 
     def test_ocr_never_overrides_a_reconciling_text_parse(self, fixture_dir, monkeypatch):
-        def _boom(path):
+        def _boom(path, dpi):
             raise AssertionError("OCR must not run when the text layer parses")
 
         monkeypatch.setattr(sp, "_ocr_pages", _boom)
@@ -191,13 +191,23 @@ class TestParsePdfOcrStage:
         c.showPage()
         c.save()
 
-        def _boom(path):
+        def _boom(path, dpi):
             raise AssertionError("OCR must not re-read a file that parsed")
 
         monkeypatch.setattr(sp, "_ocr_pages", _boom)
         r = sp.parse_pdf(path, ocr=True)
         assert r.status == STATUS_OK
         assert not r.statements[0].reconciled
+
+    def test_unreadable_cid_text_layer_is_re_read(self, all_fixtures_dir, monkeypatch):
+        """A font with no character map makes every glyph extract as
+        '(cid:12)'. That is the extractor reporting it could not read the
+        page, not text — so --ocr has to run, exactly as for a blank page."""
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: _SCANNED_TEXT)
+        r = sp.parse_pdf(all_fixtures_dir / "cid_garbage_text_layer.pdf", ocr=True)
+        assert r.status == STATUS_OK, r.detail
+        assert r.via_ocr is True
+        assert r.statements[0].reconciled
 
     def test_part_rescanned_file_is_re_read(self, monkeypatch):
         """A file where one page lost its text layer parses 'successfully' while
@@ -210,7 +220,7 @@ class TestParsePdfOcrStage:
             pdfplumber, "open", lambda *a, **k: _FakePDF([_SCANNED_TEXT[0], ""])
         )
         monkeypatch.setattr(sp, "_pymupdf_pages", lambda path: None)
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path: _SCANNED_TEXT)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: _SCANNED_TEXT)
         r = sp.parse_pdf("half_scanned.pdf", ocr=True)
         assert r.via_ocr is True
         assert len(r.statements[0].transactions) == 2
@@ -296,6 +306,30 @@ class TestRealOCR:
         assert str(stmt.opening_balance) == "1000.00"
         assert str(stmt.closing_balance) == "5500.16"
 
+    def test_scanned_capitalcity_year_in_one_file_is_read_and_reconciles(
+        self, fixture_dir, tmp_path
+    ):
+        # Capital City statements arrive only as scans, and one file holds a
+        # run of periods — every one of them has to come back reconciled, or
+        # the whole file is refused.
+        scanned = tmp_path / "capitalcity_scanned.pdf"
+        self._flatten_to_image_pdf(
+            fixture_dir / "capitalcity_checking_2021-12.pdf", scanned
+        )
+        assert sp.parse_pdf(scanned).status == STATUS_NO_TEXT
+
+        r = sp.parse_pdf(scanned, ocr=True)
+        assert r.status == STATUS_OK, r.detail
+        assert r.via_ocr is True
+        assert len(r.statements) == 2
+        assert all(s.bank == "Capital City Bank" for s in r.statements)
+        assert all(s.reconciled for s in r.statements)
+        assert [str(s.closing_balance) for s in r.statements] == ["13400.00", "14400.00"]
+        # The redacted mailing address on the first statement is a black box;
+        # whatever OCR makes of it must not reach a transaction.
+        assert all("eee" not in t.description
+                   for s in r.statements for t in s.transactions)
+
 
 class TestOcrFailuresExplainThemselves:
     """OCR that read the page but couldn't be trusted must say why. "The scan
@@ -307,10 +341,10 @@ class TestOcrFailuresExplainThemselves:
             _SCANNED_TEXT[0],
             _SCANNED_TEXT[1].replace("2,000.00 3,000.00", "9,000.00 3,000.00"),
         ]
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path: misread)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: misread)
         r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
         assert r.status == STATUS_PARSE_ERROR
-        assert "don't reconcile" in r.detail
+        assert "never reconcile" in r.detail
         assert "misread digit" in r.detail
         assert not r.statements  # the wrong numbers are never imported
 
@@ -322,7 +356,7 @@ class TestOcrFailuresExplainThemselves:
                                      "Account number: |<"),
             _SCANNED_TEXT[1],
         ]
-        monkeypatch.setattr(sp, "_ocr_pages", lambda path: redacted)
+        monkeypatch.setattr(sp, "_ocr_pages", lambda path, dpi: redacted)
         r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
         assert r.status == STATUS_PARSE_ERROR
         assert "OCR read this scan" in r.detail
@@ -330,11 +364,95 @@ class TestOcrFailuresExplainThemselves:
 
     def test_unknown_bank_in_ocr_text_says_so(self, fixture_dir, monkeypatch):
         monkeypatch.setattr(
-            sp, "_ocr_pages", lambda path: ["Example National Bank of Testing\n"]
+            sp, "_ocr_pages", lambda path, dpi: ["Example National Bank of Testing\n"]
         )
         r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
         assert r.status == STATUS_PARSE_ERROR
         assert "no bank signature was recognized" in r.detail
+
+
+class TestDpiLadder:
+    """No single render resolution reads every scan: the scanner's halftone
+    beats against the sampling grid differently at each one. The ladder is
+    walked until a parse reconciles, and reconciliation is what picks the
+    winner — so a bad rung costs time, never accuracy."""
+
+    def _garbled(self):
+        """Reads the page, but misreads a digit — parses and doesn't add up."""
+        return [
+            _SCANNED_TEXT[0],
+            _SCANNED_TEXT[1].replace("2,000.00 3,000.00", "9,000.00 3,000.00"),
+        ]
+
+    def test_first_rung_that_reconciles_wins(self, fixture_dir, monkeypatch):
+        seen = []
+
+        def _pages(path, dpi):
+            seen.append(dpi)
+            return _SCANNED_TEXT if dpi == ocr.DPI_LADDER[1] else self._garbled()
+
+        monkeypatch.setattr(sp, "_ocr_pages", _pages)
+        r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
+        assert r.status == STATUS_OK
+        assert r.via_ocr is True
+        assert r.statements[0].reconciled
+        assert seen == list(ocr.DPI_LADDER[:2])  # stopped; later rungs unused
+
+    def test_a_clean_scan_costs_only_the_first_rung(self, fixture_dir, monkeypatch):
+        seen = []
+
+        def _pages(path, dpi):
+            seen.append(dpi)
+            return _SCANNED_TEXT
+
+        monkeypatch.setattr(sp, "_ocr_pages", _pages)
+        r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
+        assert r.status == STATUS_OK
+        assert seen == [ocr.DPI_LADDER[0]]
+
+    def test_every_rung_is_tried_before_giving_up(self, fixture_dir, monkeypatch):
+        seen = []
+
+        def _pages(path, dpi):
+            seen.append(dpi)
+            return self._garbled()
+
+        monkeypatch.setattr(sp, "_ocr_pages", _pages)
+        r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
+        assert r.status == STATUS_PARSE_ERROR
+        assert seen == list(ocr.DPI_LADDER)
+        assert not r.statements  # a losing rung's figures are never imported
+
+    def test_the_closest_attempt_is_the_one_reported(self, fixture_dir, monkeypatch):
+        """Two rungs parsed and neither balanced. The one that came closest
+        points at a single misread digit, so it is what gets reported."""
+
+        def _pages(path, dpi):
+            off_by = "9,000.00" if dpi == ocr.DPI_LADDER[0] else "2,000.04"
+            return [
+                _SCANNED_TEXT[0],
+                _SCANNED_TEXT[1].replace("2,000.00 3,000.00", f"{off_by} 3,000.00"),
+            ]
+
+        monkeypatch.setattr(sp, "_ocr_pages", _pages)
+        r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
+        assert "$0.04 off" in r.detail
+
+    def test_the_most_informative_verdict_is_the_one_reported(
+        self, fixture_dir, monkeypatch
+    ):
+        """One rung read too poorly to classify, another parsed and came up
+        short. The second says where to look, so it is what gets reported."""
+
+        def _pages(path, dpi):
+            if dpi == ocr.DPI_LADDER[0]:
+                return ["blurred beyond recognition\n"]
+            return self._garbled()
+
+        monkeypatch.setattr(sp, "_ocr_pages", _pages)
+        r = sp.parse_pdf(fixture_dir / "scanned_image_only.pdf", ocr=True)
+        assert "never reconcile" in r.detail
+        assert "no bank signature" not in r.detail
 
 
 class TestOcrNeverDegradesADiagnosis:
@@ -343,7 +461,7 @@ class TestOcrNeverDegradesADiagnosis:
     re-reading of the same pixels."""
 
     def test_unrecognized_text_pdf_keeps_its_verdict(self, fixture_dir, monkeypatch):
-        def _boom(path):
+        def _boom(path, dpi):
             raise AssertionError("a file with a readable text layer must not be OCR'd")
 
         monkeypatch.setattr(sp, "_ocr_pages", _boom)

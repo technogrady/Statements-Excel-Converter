@@ -54,7 +54,7 @@ class TestInventory:
     def test_row_per_file_with_statuses(self, wb):
         rows = inventory_rows(wb)
         by_file = {r["File"]: r for r in rows}
-        assert len(rows) == 10  # 7 statements (incl. dup) + 3 failures
+        assert len(rows) == 12  # 9 statements (incl. dup) + 3 failures
         assert by_file["regions_checking_2022-01.pdf"]["Reconciled"] == "OK"
         assert by_file["regions_checking_2022-01_redownload.pdf"]["Reconciled"] == "DUPLICATE"
         assert "DUPLICATE of" in by_file["regions_checking_2022-01_redownload.pdf"]["Notes"]
@@ -64,6 +64,9 @@ class TestInventory:
         assert by_file["password_protected.pdf"]["Reconciled"] == "ENCRYPTED"
         assert by_file["wellsfargo_savings_2022-01.pdf"]["Reconciled"] == "OK"
         assert by_file["wellsfargo_checking_2022-02.pdf"]["Reconciled"] == "OK"
+        # One Capital City PDF holds two statements, so it owns two rows.
+        cc = [r for r in rows if r["File"] == "capitalcity_checking_2021-12.pdf"]
+        assert [r["Reconciled"] for r in cc] == ["OK", "OK"]
 
     def test_statement_row_values(self, wb):
         rows = inventory_rows(wb)

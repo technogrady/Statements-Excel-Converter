@@ -306,3 +306,215 @@ class TestOcrShapedInput:
                  self._PAGES[1]]
         with pytest.raises(ValueError, match="account number not found"):
             wellsfargo.parse(pages, "redacted.pdf")
+
+
+class TestScanMangledHeader:
+    """A scan mangles the page header two ways at once: it drops the space
+    after the comma and leaves speckle in the left margin. The header date is
+    the period end, so nothing parses at all until both are tolerated."""
+
+    def _pages(self, first, second):
+        return [
+            f"- Business Market Rate Savings                       WELLS\n"
+            f"{first}\n"
+            "Online: wellsfargo.com/biz\n"
+            "Statement period activity summary   Account number: 0000001234\n"
+            "Beginning balance on 1/1            $1,000.00   EXAMPLE COMPANY INC\n"
+            "Ending balance on 1/31              $1,000.00\n",
+            f"{second}\n"
+            "Transaction history\n"
+            "Date       Description          Credits    Debits    balance\n"
+            "Totals                              $0.00     $0.00\n",
+        ]
+
+    def test_missing_space_after_the_comma(self):
+        stmt = wellsfargo.parse(
+            self._pages("January 31,2022 @ Page 1 of 2", "January 31,2022 m Page 2 of 2"),
+            "scan.pdf",
+        )[0]
+        assert stmt.period_end == date(2022, 1, 31)
+
+    def test_margin_speckle_before_the_date(self):
+        stmt = wellsfargo.parse(
+            self._pages(". January 31, 2022 ml Page 1 of 2",
+                        ". January 31,2022 m@ Page 2 of 2"),
+            "scan.pdf",
+        )[0]
+        assert stmt.period_end == date(2022, 1, 31)
+
+    def test_speckle_is_not_part_of_the_product_title(self):
+        stmt = wellsfargo.parse(
+            self._pages("January 31,2022 @ Page 1 of 2", "January 31,2022 m Page 2 of 2"),
+            "scan.pdf",
+        )[0]
+        assert stmt.account_label == "Business Market Rate Savings"
+
+    def test_repeated_header_is_still_skipped_inside_the_table(self):
+        """The mangled header repeats on every page, including mid-table. It
+        must not be glued onto the previous transaction's description."""
+        pages = self._pages("January 31,2022 @ Page 1 of 2",
+                            ". January 31,2022 m@ Page 2 of 2")
+        pages[1] = pages[1].replace(
+            "Totals                              $0.00     $0.00\n",
+            "1/05    Deposit                    100.00    1,100.00\n"
+            ". January 31,2022 m@ Page 2 of 2\n"
+            "1/06    Deposit                    100.00    1,200.00\n"
+            "Totals                            $200.00       $0.00\n",
+        )
+        stmt = wellsfargo.parse(pages, "scan.pdf")[0]
+        assert [t.description for t in stmt.transactions] == ["Deposit", "Deposit"]
+
+
+class TestClosedAccountFinalStatement:
+    """The last statement of a closed account labels its final figure
+    'Closing balance on 11/20' rather than 'Ending balance on 11/30'."""
+
+    _PAGES = [
+        "Business Market Rate Savings                          WELLS\n"
+        "November 30, 2025 @ Page 1 of 2                        FARGO\n"
+        "Online: wellsfargo.com/biz\n"
+        "Final Statement for this closed account\n"
+        "Statement period activity summary   Account number: 0000001234\n"
+        "Beginning balance on 11/1                 $1.65   EXAMPLE COMPANY INC\n"
+        "Deposits/Credits                         525.00\n"
+        "Withdrawals/Debits              -        526.65\n"
+        "Closing balance on 11/20                  $0.00\n",
+        "November 30, 2025 m Page 2 of 2\n"
+        "Transaction history\n"
+        "Date     Description             Credits    Debits   balance\n"
+        "11/14    Online Transfer From Example Inc   525.00    526.65\n"
+        "11/20    Online Transfer to Example Inc     526.65      0.00\n"
+        "Closing balance on 11/20                              0.00\n"
+        "Totals                            $525.00  $526.65\n",
+    ]
+
+    def test_closing_balance_is_the_closing_balance(self):
+        stmt = wellsfargo.parse(self._PAGES, "closed.pdf")[0]
+        assert stmt.closing_balance == D("0.00")
+        assert stmt.reconciled, stmt.notes
+
+    def test_closing_balance_row_is_not_a_transaction(self):
+        stmt = wellsfargo.parse(self._PAGES, "closed.pdf")[0]
+        assert len(stmt.transactions) == 2
+
+
+class TestScanMangledTransactionDate:
+    """The slash in a transaction date is a thin mark: a scan drops it ('1/7'
+    → '17') or reads it as a digit ('9/15' → '9715'). The statement period
+    decides which reading is a date, and an unreadable row is dropped, not
+    guessed at."""
+
+    def _pages(self, row):
+        return [
+            "Business Market Rate Savings                     WELLS\n"
+            "September 30, 2022 @ Page 1 of 2                  FARGO\n"
+            "Online: wellsfargo.com/biz\n"
+            "Statement period activity summary  Account number: 0000001234\n"
+            "Beginning balance on 9/1         $1,000.00  EXAMPLE COMPANY INC\n"
+            "Ending balance on 9/30           $1,025.00\n",
+            "September 30, 2022 m Page 2 of 2\n"
+            "Transaction history\n"
+            "Date    Description               Credits   Debits   balance\n"
+            f"{row}\n"
+            "Totals                             $25.00    $0.00\n",
+        ]
+
+    def test_dropped_slash_is_restored(self):
+        stmt = wellsfargo.parse(
+            self._pages("915   Recurring Transfer From Example Inc  25.00  1,025.00"),
+            "scan.pdf",
+        )[0]
+        assert stmt.reconciled, stmt.notes
+        assert stmt.transactions[0].date == date(2022, 9, 15)
+
+    def test_slash_read_as_a_digit_is_restored(self):
+        stmt = wellsfargo.parse(
+            self._pages("9715  Recurring Transfer From Example Inc  25.00  1,025.00"),
+            "scan.pdf",
+        )[0]
+        assert stmt.reconciled, stmt.notes
+        assert stmt.transactions[0].date == date(2022, 9, 15)
+
+    def test_the_repair_is_flagged_for_spot_checking(self):
+        stmt = wellsfargo.parse(
+            self._pages("9715  Recurring Transfer From Example Inc  25.00  1,025.00"),
+            "scan.pdf",
+        )[0]
+        assert any("mangled the slash" in n for n in stmt.notes)
+
+    def test_a_reading_outside_the_period_is_not_a_date(self):
+        """'715' could be 7/15, but this is a September statement — so it is
+        no date at all, and the row is dropped rather than misfiled."""
+        stmt = wellsfargo.parse(
+            self._pages("715   Recurring Transfer From Example Inc  25.00  1,025.00"),
+            "scan.pdf",
+        )[0]
+        assert stmt.transactions == []
+        assert any("no date in this statement period" in n for n in stmt.notes)
+        assert not stmt.reconciled  # the hole is reported, never papered over
+
+    def test_a_wrapped_description_is_not_promoted_to_a_row(self):
+        stmt = wellsfargo.parse(
+            self._pages(
+                "9/15  Recurring Transfer From Example Inc  25.00  1,025.00\n"
+                "7408 continued reference line"
+            ),
+            "scan.pdf",
+        )[0]
+        assert len(stmt.transactions) == 1
+        assert stmt.transactions[0].description.endswith("7408 continued reference line")
+
+
+class TestScanMangledDecimalPoint:
+    """A scan reads the decimal point as a comma or a colon — '3,18', '157:52'.
+    The reading is decidable: a thousands separator always has three digits
+    after it, so two digits mean a decimal point."""
+
+    def _pages(self, *rows):
+        return [
+            "Business Market Rate Savings                   WELLS\n"
+            "April 30, 2023 @ Page 1 of 2                    FARGO\n"
+            "Online: wellsfargo.com/biz\n"
+            "Statement period activity summary Account number: 0000001234\n"
+            "Beginning balance on 4/1          $128.18  EXAMPLE COMPANY INC\n"
+            "Ending balance on 4/30              $3.19\n",
+            "April 30, 2023 m Page 2 of 2\n"
+            "Transaction history\n"
+            "Date    Description             Credits  Debits  balance\n"
+            + "".join(row + "\n" for row in rows)
+            + "Totals                          $25.01  $150.00\n",
+        ]
+
+    def test_comma_for_point_in_amount_and_balance(self):
+        stmt = wellsfargo.parse(
+            self._pages(
+                "4/17  Recurring Transfer From Example Inc   25,00   153,18",
+                "4/27  Online Transfer to Example Inc       150,00     3,18",
+                "4/28  Interest Payment                       0,01     3.19",
+            ),
+            "scan.pdf",
+        )[0]
+        assert stmt.reconciled, stmt.notes
+        assert [t.amount for t in stmt.transactions] == [
+            D("25.00"), D("-150.00"), D("0.01")
+        ]
+
+    def test_colon_for_point(self):
+        stmt = wellsfargo.parse(
+            self._pages(
+                "4/17  Recurring Transfer From Example Inc   25.00   153:18",
+                "4/27  Online Transfer to Example Inc       150.00     3.18",
+                "4/28  Interest Payment                       0.01     3.19",
+            ),
+            "scan.pdf",
+        )[0]
+        assert stmt.reconciled, stmt.notes
+
+    def test_a_real_thousands_separator_is_left_alone(self):
+        assert wellsfargo._money("1,234.56") == D("1234.56")
+        assert wellsfargo._money("25,00") == D("25.00")
+
+    def test_a_bare_thousands_group_is_not_read_as_cents(self):
+        """'Ref 1,234' must not be mistaken for a $1.23 amount."""
+        assert wellsfargo._TRAIL_MONEY_RE.search(" Ref 1,234") is None
+        assert wellsfargo._TRAIL_MONEY_RE.search(" 3,18") is not None

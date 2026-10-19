@@ -11,9 +11,9 @@ workbook (`Bank_Statements.xlsx`) with:
    the penny, plus a per-account **Coverage Summary** (labels used over
    time, balance-chain status, missing months).
 
-Supported banks: **Regions Bank**, **ServisFirst Bank** and **Wells
-Fargo**. Adding another bank is one new parser module (see
-[Extensibility](#extensibility)).
+Supported banks: **Regions Bank**, **ServisFirst Bank**, **Wells
+Fargo** and **Capital City Bank**. Adding another bank is one new parser
+module (see [Extensibility](#extensibility)).
 
 ## Windows setup (easy — start here)
 
@@ -74,10 +74,15 @@ To update the tool later, `cd` back into the folder and run `git pull`.
 
 ```bash
 pip install -r requirements.txt
-python parse_statements.py <input_folder> [-o output.xlsx] [--ocr]
+python3 parse_statements.py <input> [-o output.xlsx] [--ocr]
 ```
 
-The folder is searched recursively for `*.pdf` (case-insensitive). One
+(On macOS and most Linux installs the command is `python3`; plain
+`python` often isn't on PATH at all. On Windows it is `python`, or just
+`statements` after running `install.bat`.)
+
+`<input>` is a folder — searched recursively for `*.pdf`
+(case-insensitive) — or a single PDF. One
 bad PDF never aborts the run — encrypted, unrecognized, scanned-image,
 or unparsable files become flagged Inventory rows, and a run summary is
 printed to stdout.
@@ -94,7 +99,9 @@ see [Scanned statements (`--ocr`)](#scanned-statements---ocr).
   totals are also cross-checked against the statement's own summary
   figures (Regions section totals; ServisFirst `9 Deposits/Credits` /
   `22 Checks/Debits` declarations, check-image captions; Wells Fargo
-  `Deposits/Credits` / `Withdrawals/Debits` summary totals).
+  `Deposits/Credits` / `Withdrawals/Debits` summary totals; Capital City
+  `5 Deposits/Credits` / `41 Checks/Debits` declarations **and its whole
+  `DAILY BALANCE INFORMATION` table**, day by day).
 * **Balance chaining (per account)** — each statement's closing balance
   must equal the next statement's opening balance. Chains that link
   across a product-name change prove "renamed account, same account";
@@ -140,6 +147,77 @@ re-run.
 scanned back in has no text layer at all. Run with `--ocr` to machine-read
 it — see [Scanned statements (`--ocr`)](#scanned-statements---ocr).
 
+### Capital City: a year of statements in one PDF
+
+Capital City customers are usually handed a single file holding every
+statement for the year, one period after another, each ending at
+`------------END OF STATEMENT----------`. The parser emits one statement
+per period rather than one per file, and consolidation chains their
+balances exactly as it would a folder of separate downloads — so a
+12-month PDF produces 12 Inventory rows and one account worksheet.
+
+Two things follow from that:
+
+* **Each period is judged on its own.** One period that doesn't
+  reconcile is flagged by itself; the other eleven still import.
+* **`DAILY BALANCE INFORMATION` is checked in full**, not just its last
+  figure. Every day the table prints must equal the opening balance plus
+  every transaction up to that day, so a wrong figure is reported with
+  the date it belongs to (`2024-01-16 prints $56,449.31, transactions
+  give $56,897.31`) instead of a single whole-statement discrepancy.
+  On a machine-read scan that is what turns "something is $448 out" into
+  "look at 1/16".
+
+`Service Charges` and `Interest Paid` are printed as summary lines
+*outside* the `Deposits/Credits` and `Checks/Debits` totals. Neither is
+turned into a transaction: a nonzero one that no parsed row accounts for
+is reported on the Inventory tab, and reconciliation fails rather than
+importing a row the statement never itemized.
+
+The account number is masked (`XXXXXXX9012`), so statements are grouped
+by its last four digits — the same handling as ServisFirst.
+
+**Scanned statements:** these arrive as scans in practice, and `--ocr`
+reads them. Three misreads of this layout are repaired, each only
+because the statement itself decides the reading: a money token split at
+its decimal point (`448 .28`, where the printed gap to the amount column
+is always many spaces and this one is a single space), a decimal point
+read as a comma or colon, and a date that picked up a stray digit
+(`7/22` → `71/22`, resolved only when exactly one reading falls inside
+the statement period). Every repaired date is named in a note so you can
+check it; an undecidable one is reported, never quietly moved.
+
+## When a statement won't parse (`--dump-text`)
+
+A file that comes back `UNRECOGNIZED`, `NO_TEXT` or `PARSE_ERROR` can
+only be diagnosed from the text the extractor actually produced — and
+that text is somebody's bank statement. `--dump-text` prints it with the
+identifying parts removed, so it can be handed to whoever is fixing the
+parser without handing over the statement:
+
+```bash
+python3 parse_statements.py "path/to/Statements 2024.pdf" --dump-text --pages 2
+```
+
+It writes no workbook. For each extractor in turn — pdfplumber, PyMuPDF,
+and OCR if nothing readable came back and `--ocr` is given — it prints
+what that extractor saw, so "which stage lost it" is answerable at a
+glance. `--pages N` stops after the first N pages of each file; two is
+usually enough to show a layout.
+
+**Removed:** the holder's name and mailing address, and every account,
+routing or reference number (digits become `#` of the same length, and
+the four real digits inside a bank-printed `XXXXXXX5255` go too).
+
+**Kept:** section headers, column rules, dates, amounts, merchant names
+and the addresses inside transaction descriptions. Those are a shop's
+address, not the holder's, and a wrapped description is exactly what the
+parser gets wrong. So a dump still shows what was spent and where — it
+is safe to send to someone fixing the parser, not safe to publish. The
+redaction works by shape, so read a dump before passing it on; see
+`statement_parsers/redact.py` for what it recognizes and what it admits
+it can miss.
+
 ## Scanned statements (`--ocr`)
 
 Statements that were printed and scanned back in carry no text layer, so
@@ -148,7 +226,7 @@ every extractor returns nothing and the file is reported `NO_TEXT
 instead:
 
 ```bash
-python parse_statements.py ./statements --ocr
+python3 parse_statements.py ./statements --ocr
 ```
 
 ```powershell
@@ -169,6 +247,13 @@ come back as `3`:
   Σ(transactions) == closing` to the penny is a demanding check on
   machine-read digits: one misread amount breaks it, and the file is then
   reported unread rather than imported with wrong numbers in it.
+* **Several render resolutions are tried, and reconciliation picks the
+  winner.** There is no single best one — the scanner's halftone beats
+  against the sampling grid differently at each, so a page that reads
+  perfectly at 300 dpi can lose a whole line at 400 and get it back at
+  200. Each rung of 300 → 400 → 200 → 500 dpi is parsed in turn and the
+  first one whose figures add up wins, so a wrong rung costs time, never
+  accuracy. A statement that reads cleanly at the first rung stops there.
 * **Accepted statements are still flagged.** Every OCR'd statement gets
   an `OCR:` note on the Inventory tab telling you to spot-check it, and
   the run summary counts them.
@@ -182,7 +267,18 @@ come back as `3`:
   scan read fine but its account number is blacked out" need completely
   different fixes, so the Inventory row names the actual one.
 
-Expect a few seconds per page. Only the scanned files pay that cost.
+A scan mangles the same few glyphs every time, and the Wells Fargo parser
+repairs those — but only where the statement itself decides the reading,
+never because a repair looks likely. A decimal point read as a comma or a
+colon (`3,18`, `157:52`) is unambiguous, since a thousands separator
+always has three digits after it. A transaction date that lost its slash
+(`1/7` → `17`) or had it read as a digit (`9/15` → `9715`) is resolved
+against the statement period, and a row no reading fits is dropped rather
+than guessed at — leaving a hole reconciliation reports. Every repaired
+date is named in a note on the Inventory tab so you can check it.
+
+Expect a few seconds per page — more for a scan that needs several rungs
+of the resolution ladder. Only the scanned files pay that cost.
 
 One thing worth knowing: **a redacted account number blocks import.** If
 the number is blacked out on the scan, OCR reads punctuation and the
@@ -200,7 +296,9 @@ statement_parsers/
     regions.py             # Regions Bank parser
     servisfirst.py         # ServisFirst Bank parser
     wellsfargo.py          # Wells Fargo parser
+    capitalcity.py         # Capital City Bank parser
     ocr.py                 # optional OCR fallback for scans (--ocr)
+    redact.py              # strip identity from extracted text (--dump-text)
 consolidation.py           # dedup, account grouping, balance chaining,
                            # label variance, missing-month detection
 excel_writer.py            # workbook generation (xlsxwriter)
@@ -234,13 +332,19 @@ The original statement samples can't be committed, so
 pdfplumber extraction layout — including the quirks the parsers must
 survive (wrapped description fragments, trailing-minus amounts,
 sections breaking mid-transaction across pages, three-triplet CHECKS
-rows, check-image caption pages, interleaved summary columns).
+rows, check-image caption pages, interleaved summary columns, two
+statements back to back in one file, a redacted mailing address).
+A text layer is not always readable text: when an embedded font carries
+no character map, every glyph extracts as `(cid:12)` and the page says
+nothing. Those files are reported as unreadable rather than
+unrecognized, and `--ocr` treats them as the scans they effectively are.
+
 `tests/fixtures/extracted_text/` holds the raw `page.extract_text()`
 dumps the parsing regexes were calibrated against — per the project
 rule: build parsing against actual extracted text, not the visual PDF.
 
 ```bash
-python -m pytest tests/
+python3 -m pytest tests/
 ```
 
 The suite asserts the engagement's known-correct ground truth (balances,
