@@ -44,7 +44,8 @@ def find_pdfs(target: Path) -> list[Path]:
     )
 
 
-def dump_text(pdfs: list[Path], use_ocr: bool, max_pages: int | None) -> int:
+def dump_text(pdfs: list[Path], root: Path, use_ocr: bool,
+              max_pages: int | None, only_failures: bool) -> int:
     """Print a redacted dump of what each extractor read. Writes no workbook.
 
     This is the diagnostic path: when a statement won't parse, the only thing
@@ -53,9 +54,37 @@ def dump_text(pdfs: list[Path], use_ocr: bool, max_pages: int | None) -> int:
     through redact_text first — but read it before sending it on. It still
     shows amounts, merchants and dates; redaction removes identity, not the
     statement.
+
+    Pointed at a folder it dumps only the files that failed to parse, which
+    is the question being asked — the ones that worked have nothing to
+    diagnose, and a folder of statements runs to tens of thousands of lines.
+    Pointed at a single PDF it dumps that PDF either way.
     """
+    if only_failures:
+        failed = []
+        for path in pdfs:
+            result = parse_pdf(path, ocr=use_ocr)
+            if result.status != STATUS_OK:
+                failed.append((path, result))
+        if not failed:
+            print(f"All {len(pdfs)} file(s) parsed — nothing to diagnose.")
+            return 0
+        print(f"# {len(failed)} of {len(pdfs)} file(s) failed to parse; "
+              f"dumping those.\n")
+        pdfs = [path for path, _ in failed]
+        reasons = {path: result for path, result in failed}
+    else:
+        reasons = {}
+
     for path in pdfs:
-        print(f"########## {path.name} ##########")
+        try:
+            label = path.relative_to(root)
+        except ValueError:
+            label = path.name
+        print(f"########## {label} ##########")
+        result = reasons.get(path)
+        if result is not None:
+            print(f"# {result.status}: {result.detail}")
         for name, pages in extract_pages(path, ocr=use_ocr):
             shown = pages if max_pages is None else pages[:max_pages]
             total = (f"{len(pages)} page(s)" if max_pages is None or len(pages) <= max_pages
@@ -134,7 +163,8 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr if args.dump_text else sys.stdout)
 
     if args.dump_text:
-        return dump_text(pdfs, use_ocr, args.pages)
+        return dump_text(pdfs, folder if folder.is_dir() else folder.parent,
+                         use_ocr, args.pages, only_failures=folder.is_dir())
 
     print(f"Scanning {len(pdfs)} PDF file(s) in {folder} ...")
     results = []

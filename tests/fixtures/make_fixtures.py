@@ -781,6 +781,40 @@ def make_capitalcity(path: Path) -> None:
     _write_pages(path, [page1, page2, page3, page4])
 
 
+def make_capitalcity_activity(path: Path) -> None:
+    """Capital City's *other* document: an Activity Statement (synthetic).
+
+    A running list of cleared items issued between the regular monthly
+    statements, in a different layout entirely — Date / Check # / Tran Code
+    / Description / Amount / Balance, no statement period, no summary block,
+    debits in parentheses. It carries a disclaimer saying its items will
+    appear again on the regular statement, which is why the parser refuses
+    it instead of importing the same transactions twice.
+    """
+    page = [
+        "CAPITAL CITY BANK",
+        "0000 Example Place",
+        "Anytown, FL 00000",
+        "850-000-0000",
+        "Activity Statement",
+        "EXAMPLE CONTRACTING LLC Account Number: XXXXXXXXXXXX9012",
+        "12 EXAMPLE LN Interest Rate: 0.000000 %",
+        "ANYTOWN FL 00000-0000 Previous Statement Balance: $3,212.43",
+        "Average Balance: $3,184.62",
+        "Date Check # Tran Code Description Amount Balance",
+        "08/03/26 25 Online Banking Transfer Debit ($5.00) $3,207.43",
+        "Trsf to Checking XX9012 Funds",
+        "Transfer via Online",
+        "08/06/26 31 Deposit ticket $671.59 $3,879.02",
+        "08/07/26 10355 58 Check ($51.60) $3,827.42",
+        "This temporary statement from CAPITAL CITY BANK is not a formal "
+        "statement of your account.",
+        "These items will be reflected again on your regularly scheduled statement.",
+        "August 20, 2026 Page: 1",
+    ]
+    _write_pages(path, [page])
+
+
 # ---------------------------------------------------------------------------
 # Negative-path fixtures
 # ---------------------------------------------------------------------------
@@ -838,6 +872,7 @@ ALL_FIXTURES = {
     "wellsfargo_savings_2022-01.pdf": make_wellsfargo_savings,
     "wellsfargo_checking_2022-02.pdf": make_wellsfargo_checking,
     "capitalcity_checking_2021-12.pdf": make_capitalcity,
+    "capitalcity_activity_statement.pdf": make_capitalcity_activity,
     "regions_checking_2022-01_redownload.pdf": make_regions_dec,
     "regions_personal_2022-02.pdf": make_regions_personal,
     "unknown_bank.pdf": make_unrecognized_bank,

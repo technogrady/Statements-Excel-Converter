@@ -1,0 +1,19 @@
+===== page 1 =====
+CAPITAL CITY BANK
+0000 Example Place
+Anytown, FL 00000
+850-000-0000
+Activity Statement
+EXAMPLE CONTRACTING LLC Account Number: XXXXXXXXXXXX9012
+12 EXAMPLE LN Interest Rate: 0.000000 %
+ANYTOWN FL 00000-0000 Previous Statement Balance: $3,212.43
+Average Balance: $3,184.62
+Date Check # Tran Code Description Amount Balance
+08/03/26 25 Online Banking Transfer Debit ($5.00) $3,207.43
+Trsf to Checking XX9012 Funds
+Transfer via Online
+08/06/26 31 Deposit ticket $671.59 $3,879.02
+08/07/26 10355 58 Check ($51.60) $3,827.42
+This temporary statement from CAPITAL CITY BANK is not a formal statement of your account.
+These items will be reflected again on your regularly scheduled statement.
+August 20, 2026 Page: 1

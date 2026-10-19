@@ -7,7 +7,12 @@ from decimal import Decimal
 import pytest
 
 from statement_parsers import capitalcity
-from statement_parsers.base import TX_CHECK, TX_DEPOSIT, TX_WITHDRAWAL
+from statement_parsers.base import (
+    TX_CHECK,
+    TX_DEPOSIT,
+    TX_TRANSFER,
+    TX_WITHDRAWAL,
+)
 
 # Statement A: 2021-11-16 → 2021-12-14, the one whose address is redacted.
 EXPECTED_A = [
@@ -288,3 +293,90 @@ class TestCrossChecks:
         assert not statement.transactions  # nothing is fabricated
         assert any("Service Charges of $15.00" in n for n in statement.notes)
         assert not statement.reconciled  # and it is never passed off as balanced
+
+
+
+class TestActivityStatement:
+    """Capital City's other document: an interim running list of cleared
+    items, in a different layout entirely — no period, no summary block, no
+    section headers, but a running Balance column on every row."""
+
+    def _one(self, all_fixtures_dir):
+        from statement_parsers import parse_pdf
+        from statement_parsers.base import STATUS_OK
+
+        result = parse_pdf(all_fixtures_dir / "capitalcity_activity_statement.pdf")
+        assert result.status == STATUS_OK, result.detail
+        assert len(result.statements) == 1
+        return result.statements[0]
+
+    def test_identity_and_period_come_from_the_rows(self, all_fixtures_dir):
+        s = self._one(all_fixtures_dir)
+        assert s.bank == "Capital City Bank"
+        assert s.account_last4 == "9012"
+        assert s.account_label == "ACTIVITY STATEMENT"
+        # the only date in the header is the day it was printed, so the
+        # period is the span of the transactions themselves
+        assert s.period_start == date(2026, 8, 3)
+        assert s.period_end == date(2026, 8, 7)
+
+    def test_opens_from_previous_statement_balance_and_closes_on_the_column(
+        self, all_fixtures_dir
+    ):
+        s = self._one(all_fixtures_dir)
+        assert s.opening_balance == Decimal("3212.43")
+        assert s.closing_balance == Decimal("3827.42")
+        assert s.reconciled, s.notes
+
+    def test_rows(self, all_fixtures_dir):
+        assert _rows(self._one(all_fixtures_dir)) == [
+            (date(2026, 8, 3), Decimal("-5.00"), TX_TRANSFER, None),
+            (date(2026, 8, 6), Decimal("671.59"), TX_DEPOSIT, None),
+            (date(2026, 8, 7), Decimal("-51.60"), TX_CHECK, "10355"),
+        ]
+
+    def test_parenthesised_amounts_are_debits(self, all_fixtures_dir):
+        amounts = [t.amount for t in self._one(all_fixtures_dir).transactions]
+        assert amounts[0] < 0 and amounts[1] > 0
+
+    def test_wrapped_description_is_joined(self, all_fixtures_dir):
+        first = self._one(all_fixtures_dir).transactions[0]
+        assert first.description.endswith("Transfer via Online")
+
+    def test_it_warns_that_these_items_repeat_on_the_monthly_statement(
+        self, all_fixtures_dir
+    ):
+        note = self._one(all_fixtures_dir).notes[0]
+        assert "Activity Statement" in note
+        assert "twice" in note
+
+    def test_the_balance_column_catches_a_wrong_row(self):
+        # Every row's printed balance must equal everything above it; a row
+        # that doesn't fit is named, not silently accepted.
+        page = "\n".join([
+            "CAPITAL CITY BANK",
+            "Activity Statement",
+            "EXAMPLE LLC Account Number: XXXXXXXXXXXX9012",
+            "Previous Statement Balance: $1,000.00",
+            "Date Check # Tran Code Description Amount Balance",
+            "08/03/26 25 Online Banking Transfer Debit ($100.00) $800.00",
+            "This temporary statement from CAPITAL CITY BANK is not a formal "
+            "statement of your account.",
+        ])
+        s = capitalcity.parse([page], "x.pdf")[0]
+        assert any("Balance column disagrees" in n for n in s.notes)
+
+    def test_a_monthly_statement_is_not_taken_for_one(self, capitalcity_result):
+        assert len(capitalcity_result.statements) == 2
+        assert all(s.account_label == "EVERYDAY CHECKING FOR BUSINESS"
+                   for s in capitalcity_result.statements)
+
+    def test_routing_is_unchanged(self, all_fixtures_dir):
+        import pdfplumber
+
+        from statement_parsers import detect_bank
+
+        with pdfplumber.open(
+            all_fixtures_dir / "capitalcity_activity_statement.pdf"
+        ) as pdf:
+            assert detect_bank(pdf.pages[0].extract_text()) is capitalcity

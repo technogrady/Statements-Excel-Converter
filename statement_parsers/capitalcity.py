@@ -219,6 +219,53 @@ _SERVICE_CHARGE_RE = re.compile(rf"^Service Charges?\s+({_AMOUNT})", re.IGNORECA
 _INTEREST_PAID_RE = re.compile(rf"^Interest Paid\s+({_AMOUNT})", re.IGNORECASE)
 _END_OF_STATEMENT_RE = re.compile(r"-*END OF STATEMENT-*\s*$", re.IGNORECASE)
 
+# Capital City also issues an 'Activity Statement' / 'Current Statement': a
+# running list of cleared items between regular statements, in a completely
+# different layout (Date / Check # / Tran Code / Description / Amount /
+# Balance, no period, no summary block). It carries its own disclaimer, and
+# that disclaimer is the reason it is refused rather than parsed.
+_INTERIM_RE = re.compile(
+    r"not a formal statement of your account"
+    r"|temporary statement from\s+CAPITAL CITY BANK"
+    r"|reflected again on your regularly scheduled statement",
+    re.IGNORECASE,
+)
+INTERIM_NOTE = (
+    f"{BANK}: this is an Activity Statement — the bank's own temporary "
+    "statement, which says its items \"will be reflected again on your "
+    "regularly scheduled statement\". If the monthly statement covering the "
+    "same dates is also imported, those transactions appear twice: the two "
+    "copies are separate statements, and deduplication works per statement, "
+    "never per transaction. Check the overlap before relying on the totals."
+)
+ACTIVITY_LABEL = "ACTIVITY STATEMENT"
+
+# Its column rule, which is also where the transaction table starts. Nothing
+# above it is parsed, which is what keeps the two-column holder/field header
+# out of the way without having to recognize any of it.
+_ACTIVITY_COLHDR_RE = re.compile(
+    r"^Date\s+Check\s*#\s+Tran\s*Code\s+Description\s+Amount\s+Balance",
+    re.IGNORECASE,
+)
+_ACTIVITY_ACCOUNT_RE = re.compile(r"Account Number:\s*([Xx*]*\d+)", re.IGNORECASE)
+_ACTIVITY_PREV_BAL_RE = re.compile(
+    rf"Previous Statement Balance:\s*(\(?\$?[\d,]*{_CENTS}\)?-?)", re.IGNORECASE
+)
+_ACTIVITY_MONEY = rf"\(?\$[\d,]*{_CENTS}\)?"
+# 'MM/DD/YYYY [check#] trancode Description (amount) balance'. The check
+# number column is blank on anything that isn't a check, and the two numbers
+# are told apart by how many there are, never by their size: a tran code of
+# 360 and a check number of 183 are the same shape.
+_ACTIVITY_ROW_RE = re.compile(
+    rf"^(\d{{1,2}}/\d{{1,2}}/\d{{2,4}})\s+(?:(\d+)\s+)?(\d+)\s+(.+?)\s+"
+    rf"({_ACTIVITY_MONEY})\s+({_ACTIVITY_MONEY})$"
+)
+_ACTIVITY_FURNITURE_RES = [
+    re.compile(r"^This temporary statement", re.IGNORECASE),
+    re.compile(r"^These items will be reflected", re.IGNORECASE),
+    re.compile(r"\bPage:\s*\d+\s*$", re.IGNORECASE),
+]
+
 _SECTION_HEADERS = [
     (re.compile(r"^DEPOSITS AND OTHER CREDITS\b", re.IGNORECASE), _SEC_DEPOSITS),
     (re.compile(r"^OTHER DEBITS\b", re.IGNORECASE), _SEC_DEBITS),
@@ -437,7 +484,135 @@ def _clean_label(line: str) -> str:
     return re.sub(r"\s+", " ", line).strip()
 
 
+def _parse_activity(pages: list[str], filename: str) -> list[ParsedStatement]:
+    """Parse an Activity Statement — Capital City's interim running list.
+
+    A different document from the monthly statement and a different shape:
+    no statement period, no summary block, no section headers. What it does
+    have is a running Balance column on every row, and that is enough to
+    build a statement from and to check it with:
+
+    * the opening balance is the printed ``Previous Statement Balance``;
+    * the closing balance is the last row's running balance;
+    * the period is the span of the rows themselves, since the only date in
+      the header is the day the document was printed;
+    * every row's running balance must equal the opening balance plus
+      everything up to it — the same arithmetic the monthly statement's
+      daily balance table gives, but per row, so a disagreement names the
+      transaction rather than the day.
+
+    Signs come from the amount column (debits print in parentheses) and are
+    confirmed by that balance chain, so a misread sign cannot pass quietly.
+
+    These items reappear on the regular monthly statement for the same
+    dates; the statement carries INTERIM_NOTE saying so, because nothing
+    downstream can tell two copies of a transaction apart.
+    """
+    lines: list[str] = []
+    for page in pages:
+        for line in (page or "").splitlines():
+            line = re.sub(r"[ \t]+", " ", line).strip()
+            if line and not any(rx.search(line) for rx in _ACTIVITY_FURNITURE_RES):
+                lines.append(line)
+
+    joined = "\n".join(lines)
+    account = _ACTIVITY_ACCOUNT_RE.search(joined)
+    if account is None:
+        raise ValueError(
+            f"{BANK}: Activity Statement carries no readable account number — "
+            "statements are grouped by it, so it cannot be imported without one"
+        )
+    opening_match = _ACTIVITY_PREV_BAL_RE.search(joined)
+    if opening_match is None:
+        raise ValueError(
+            f"{BANK}: Activity Statement has no 'Previous Statement Balance' "
+            "to open from"
+        )
+    opening = _money(opening_match.group(1))
+
+    account_full, last4 = split_account_number(account.group(1))
+    notes: list[str] = [INTERIM_NOTE]
+    transactions: list[Transaction] = []
+    balances: list[Decimal] = []
+    last_tx: Transaction | None = None
+    in_table = False
+
+    for line in lines:
+        if not in_table:
+            # Everything above the column rule is the two-column holder and
+            # field header; starting at the rule skips all of it.
+            in_table = bool(_ACTIVITY_COLHDR_RE.match(line))
+            continue
+        row = _ACTIVITY_ROW_RE.match(line)
+        if row:
+            when = datetime.strptime(
+                row.group(1),
+                "%m/%d/%Y" if len(row.group(1).split("/")[-1]) == 4 else "%m/%d/%y",
+            ).date()
+            check_no = row.group(2)
+            description = row.group(4).strip()
+            amount = _money(row.group(5))
+            last_tx = Transaction(when, description, amount,
+                                  _tx_type(description, amount, check_no),
+                                  check_no, filename)
+            transactions.append(last_tx)
+            balances.append(_money(row.group(6)))
+            continue
+        if last_tx is not None:
+            last_tx.description += " " + line
+        else:
+            notes.append(f"{BANK}: stray line in Activity Statement ignored: {line!r}")
+
+    if not transactions:
+        raise ValueError(f"{BANK}: Activity Statement has no transaction rows")
+
+    _check_running_balances(opening, transactions, balances, notes)
+
+    return [
+        ParsedStatement(
+            bank=BANK,
+            account_number_full=account_full,
+            account_last4=last4,
+            account_label=ACTIVITY_LABEL,
+            period_start=min(t.date for t in transactions),
+            period_end=max(t.date for t in transactions),
+            opening_balance=opening,
+            closing_balance=balances[-1],
+            transactions=transactions,
+            source_file=filename,
+            notes=notes,
+        ).finalize()
+    ]
+
+
+def _check_running_balances(opening: Decimal, transactions: list[Transaction],
+                            balances: list[Decimal], notes: list[str]) -> None:
+    """Every row's printed balance must equal everything above it.
+
+    Reported per row, so a wrong figure names the transaction it came from
+    rather than just failing the statement as a whole.
+    """
+    running = opening
+    mismatches = []
+    for tx, printed in zip(transactions, balances):
+        running += tx.amount
+        if running != printed:
+            mismatches.append((tx, printed, running))
+            running = printed  # resynchronize, so one bad row isn't reported N times
+    if not mismatches:
+        return
+    shown = "; ".join(
+        f"{tx.date.isoformat()} {tx.description[:30]!r} prints "
+        f"{money_str(printed)}, the rows give {money_str(expected)}"
+        for tx, printed, expected in mismatches[:3]
+    )
+    more = "" if len(mismatches) <= 3 else f" (+{len(mismatches) - 3} more)"
+    notes.append(f"{BANK}: the Balance column disagrees with the rows — {shown}{more}")
+
+
 def parse(pages: list[str], filename: str) -> list[ParsedStatement]:
+    if _INTERIM_RE.search("\n".join(pages)):
+        return _parse_activity(pages, filename)
     lines = _clean_pages(pages)
 
     statements: list[ParsedStatement] = []

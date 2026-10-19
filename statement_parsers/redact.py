@@ -107,6 +107,10 @@ _STATEMENT_VOCAB_RE = re.compile(
     re.IGNORECASE,
 )
 _URL_RE = re.compile(r"(?://|\b\w+\.(?:com|net|org|gov|co\.uk)\b)", re.IGNORECASE)
+# A field's printed value — a masked account number, a rate, a figure. It has
+# no words in it, so it is never a name, and taking it for one would hide the
+# shape of the very field being diagnosed.
+_VALUE_ONLY_RE = re.compile(r"^[\dXx*#.,%$()\s/:+-]+$")
 _MONEY_RE = re.compile(r"\d[\d,]*[.,:]\d{2}(?!\d)")
 _SHORT_DATE_RE = re.compile(r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b")
 _LONG_DATE_RE = re.compile(
@@ -128,6 +132,8 @@ def _looks_like_a_name(text: str) -> bool:
     """
     text = text.strip(" \t|,")
     if not text or not re.search(r"[A-Za-z]", text) or len(text) > 60:
+        return False
+    if _VALUE_ONLY_RE.match(text):
         return False
     # A name is a handful of words, not prose. Marketing copy and URLs sit in
     # the same header block, and the bank's own name in them is what routes
