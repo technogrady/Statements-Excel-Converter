@@ -18,6 +18,12 @@ Two deliberate design choices:
   transaction table into a list of dates followed by a list of
   amounts. Mode 6 keeps each printed row on one line — the same shape
   the parsers already expect from ``pdfplumber``.
+* **No single render resolution.** ``DPI_LADDER`` exists because there
+  isn't one: the scanner's halftone beats against the sampling grid
+  differently at each resolution, so the same page can read perfectly
+  at 300 dpi, drop a whole line at 400, and come back at 200. Callers
+  render at one rung, parse, and reach for the next only when the
+  figures don't add up.
 
 OCR is *machine reading*: a smudged ``8`` can come back as ``3``. The
 parsers' own arithmetic is the guard — a misread amount breaks
@@ -39,6 +45,13 @@ TESSERACT_ENV = "TESSERACT_CMD"
 PSM_ENV = "TESSERACT_PSM"
 DEFAULT_PSM = "6"
 DEFAULT_DPI = 300
+# Render resolutions to try, in order, until a statement reconciles. There is
+# no single best one: the scanner's own halftone beats against the sampling
+# grid differently at each, so a page that reads perfectly at 300 can lose a
+# whole line at 400 and get it back at 200. Callers walk this ladder and stop
+# at the first rung whose parse adds up (see statement_parsers._ocr_attempt),
+# so a statement that reads cleanly at 300 never pays for the rest.
+DPI_LADDER = (300, 400, 200, 500)
 # Per-page ceiling. A 300-dpi letter page is a couple of seconds; anything
 # near this means something is wrong, and one bad page must not hang a run.
 PAGE_TIMEOUT = 180

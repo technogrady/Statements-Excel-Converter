@@ -1,4 +1,10 @@
-from statement_parsers import detect_bank, parse_pdf, regions, servisfirst
+from statement_parsers import (
+    capitalcity,
+    detect_bank,
+    parse_pdf,
+    regions,
+    servisfirst,
+)
 from statement_parsers.base import (
     STATUS_ENCRYPTED,
     STATUS_NO_TEXT,
@@ -25,6 +31,28 @@ class TestDetection:
         # "ServisFirst" text); the reverse-side disclosure footer recovers them.
         text = (
             "P.O. Box 1508 Birmingham, AL 35201 MEMBER FDIC "
+            "NOTICE: SEE REVERSE SIDE FOR IMPORTANT INFORMATION"
+        )
+        assert detect_bank(text) is servisfirst
+
+    def test_capitalcity_by_marketing_blurb(self):
+        # Capital City prints no wordmark in text; the promo names the bank.
+        assert detect_bank("learn more at ccbg.com/makingcents") is capitalcity
+
+    def test_capitalcity_by_layout_when_nothing_names_the_bank(self):
+        text = (
+            "Primary Account XXXXXXX9012\n"
+            "Previous Balance 10,000.00 Days in this Statement Period 29\n"
+            "Ending Balance 13,400.00"
+        )
+        assert detect_bank(text) is capitalcity
+
+    def test_servisfirst_layout_is_not_taken_by_capitalcity(self):
+        # Both are the same core-banking print, and Capital City is matched
+        # first — its fallback must not fire on a ServisFirst statement.
+        text = (
+            "Primary Acct. XXXXXXXXXXXX5678\n"
+            "Previous Balance 20,000.00\nCurrent Balance 26,550.00\n"
             "NOTICE: SEE REVERSE SIDE FOR IMPORTANT INFORMATION"
         )
         assert detect_bank(text) is servisfirst

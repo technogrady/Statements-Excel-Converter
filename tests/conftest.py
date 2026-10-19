@@ -82,3 +82,12 @@ def wellsfargo_checking_stmt(fixture_dir):
     result = _parse_one(fixture_dir, "wellsfargo_checking_2022-02.pdf")
     assert len(result.statements) == 1
     return result.statements[0]
+
+
+@pytest.fixture(scope="session")
+def capitalcity_result(fixture_dir):
+    """Capital City ships a year of statements in one PDF; the fixture carries
+    two, so this returns the whole FileResult rather than one statement."""
+    result = _parse_one(fixture_dir, "capitalcity_checking_2021-12.pdf")
+    assert len(result.statements) == 2
+    return result
