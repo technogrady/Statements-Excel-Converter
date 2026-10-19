@@ -74,8 +74,12 @@ To update the tool later, `cd` back into the folder and run `git pull`.
 
 ```bash
 pip install -r requirements.txt
-python parse_statements.py <input> [-o output.xlsx] [--ocr]
+python3 parse_statements.py <input> [-o output.xlsx] [--ocr]
 ```
+
+(On macOS and most Linux installs the command is `python3`; plain
+`python` often isn't on PATH at all. On Windows it is `python`, or just
+`statements` after running `install.bat`.)
 
 `<input>` is a folder — searched recursively for `*.pdf`
 (case-insensitive) — or a single PDF. One
@@ -192,7 +196,7 @@ identifying parts removed, so it can be handed to whoever is fixing the
 parser without handing over the statement:
 
 ```bash
-python parse_statements.py "path/to/Statements 2024.pdf" --dump-text --pages 2
+python3 parse_statements.py "path/to/Statements 2024.pdf" --dump-text --pages 2
 ```
 
 It writes no workbook. For each extractor in turn — pdfplumber, PyMuPDF,
@@ -222,7 +226,7 @@ every extractor returns nothing and the file is reported `NO_TEXT
 instead:
 
 ```bash
-python parse_statements.py ./statements --ocr
+python3 parse_statements.py ./statements --ocr
 ```
 
 ```powershell
@@ -340,7 +344,7 @@ dumps the parsing regexes were calibrated against — per the project
 rule: build parsing against actual extracted text, not the visual PDF.
 
 ```bash
-python -m pytest tests/
+python3 -m pytest tests/
 ```
 
 The suite asserts the engagement's known-correct ground truth (balances,
